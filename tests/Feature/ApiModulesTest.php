@@ -12,6 +12,24 @@ class ApiModulesTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_register_returns_specific_validation_messages(): void
+    {
+        User::factory()->create([
+            'email' => 'existente@teste.com',
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        $this->postJson('/api/auth/register', [
+            'name' => 'Matheus',
+            'email' => 'existente@teste.com',
+            'password' => '123',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.email.0', 'Este e-mail ja esta cadastrado.')
+            ->assertJsonPath('errors.password.0', 'A senha deve ter pelo menos 8 caracteres.');
+    }
+
     public function test_authenticated_user_can_upsert_and_read_app_settings(): void
     {
         $user = User::factory()->create([

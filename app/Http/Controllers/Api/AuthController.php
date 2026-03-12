@@ -12,11 +12,24 @@ final class AuthController
 {
     public function register(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'name' => ['required', 'string', 'max:120'],
-            'email' => ['required', 'email', 'max:190', 'unique:users,email'],
-            'password' => ['required', 'string', 'min:6'],
-        ]);
+        $validator = Validator::make(
+            $request->all(),
+            [
+                'name' => ['required', 'string', 'max:120'],
+                'email' => ['required', 'email', 'max:190', 'unique:users,email'],
+                'password' => ['required', 'string', 'min:8'],
+            ],
+            [
+                'name.required' => 'Informe seu nome.',
+                'name.max' => 'O nome deve ter no maximo 120 caracteres.',
+                'email.required' => 'Informe seu e-mail.',
+                'email.email' => 'Informe um e-mail valido.',
+                'email.max' => 'O e-mail deve ter no maximo 190 caracteres.',
+                'email.unique' => 'Este e-mail ja esta cadastrado.',
+                'password.required' => 'Informe uma senha.',
+                'password.min' => 'A senha deve ter pelo menos 8 caracteres.',
+            ],
+        );
 
         if ($validator->fails()) {
             return response()->json([
@@ -44,10 +57,18 @@ final class AuthController
 
     public function login(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string'],
-        ]);
+        $validator = Validator::make(
+            $request->all(),
+            [
+                'email' => ['required', 'email'],
+                'password' => ['required', 'string'],
+            ],
+            [
+                'email.required' => 'Informe seu e-mail.',
+                'email.email' => 'Informe um e-mail valido.',
+                'password.required' => 'Informe sua senha.',
+            ],
+        );
 
         if ($validator->fails()) {
             return response()->json([
