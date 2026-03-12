@@ -47,12 +47,15 @@ final class AppSettingController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
-        $row = DB::table('app_settings')
-            ->where('id', $setting)
-            ->where(function ($builder) use ($user) {
-                $builder->where('user_id', $user->id)->orWhereNull('user_id');
-            })
-            ->first();
+        $query = DB::table('app_settings')->where('id', $setting);
+
+        if ($this->isGlobalSetting($setting)) {
+            $query->whereNull('user_id');
+        } else {
+            $query->where('user_id', $user->id);
+        }
+
+        $row = $query->first();
 
         if (!$row) {
             return response()->json(['message' => 'Configuracao nao encontrada.'], 404);
@@ -68,9 +71,19 @@ final class AppSettingController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
-        $existing = DB::table('app_settings')->where('id', $setting)->first();
-        $userScoped = $request->boolean('user_scope', !str_starts_with($setting, 'global_'));
-        $targetUserId = $existing?->user_id ?? ($userScoped ? $user->id : null);
+        $isGlobal = $this->isGlobalSetting($setting);
+        if ($isGlobal && !$this->isAdmin($user)) {
+            return response()->json(['message' => 'Apenas administradores podem alterar esta configuracao.'], 403);
+        }
+
+        $existingQuery = DB::table('app_settings')->where('id', $setting);
+        if ($isGlobal) {
+            $existingQuery->whereNull('user_id');
+        } else {
+            $existingQuery->where('user_id', $user->id);
+        }
+        $existing = $existingQuery->first();
+        $targetUserId = $isGlobal ? null : $user->id;
 
         $payload = [
             'user_id' => $targetUserId,
@@ -79,7 +92,13 @@ final class AppSettingController
         ];
 
         if ($existing) {
-            DB::table('app_settings')->where('id', $setting)->update($payload);
+            $updateQuery = DB::table('app_settings')->where('id', $setting);
+            if ($isGlobal) {
+                $updateQuery->whereNull('user_id');
+            } else {
+                $updateQuery->where('user_id', $user->id);
+            }
+            $updateQuery->update($payload);
         } else {
             DB::table('app_settings')->insert([
                 'id' => $setting,
@@ -88,7 +107,13 @@ final class AppSettingController
             ]);
         }
 
-        $row = DB::table('app_settings')->where('id', $setting)->first();
+        $rowQuery = DB::table('app_settings')->where('id', $setting);
+        if ($isGlobal) {
+            $rowQuery->whereNull('user_id');
+        } else {
+            $rowQuery->where('user_id', $user->id);
+        }
+        $row = $rowQuery->first();
 
         return response()->json([
             'message' => 'Configuracao salva com sucesso.',
@@ -103,12 +128,18 @@ final class AppSettingController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
-        DB::table('app_settings')
-            ->where('id', $setting)
-            ->where(function ($builder) use ($user) {
-                $builder->where('user_id', $user->id)->orWhereNull('user_id');
-            })
-            ->delete();
+        $isGlobal = $this->isGlobalSetting($setting);
+        if ($isGlobal && !$this->isAdmin($user)) {
+            return response()->json(['message' => 'Apenas administradores podem remover esta configuracao.'], 403);
+        }
+
+        $query = DB::table('app_settings')->where('id', $setting);
+        if ($isGlobal) {
+            $query->whereNull('user_id');
+        } else {
+            $query->where('user_id', $user->id);
+        }
+        $query->delete();
 
         return response()->json([
             'message' => 'Configuracao removida com sucesso.',
@@ -134,5 +165,15 @@ final class AppSettingController
         }
 
         return $value;
+    }
+
+    private function isGlobalSetting(string $setting): bool
+    {
+        return str_starts_with($setting, 'global_');
+    }
+
+    private function isAdmin(object $user): bool
+    {
+        return (($user->role ?? null) === 'admin');
     }
 }

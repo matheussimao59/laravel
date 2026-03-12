@@ -54,6 +54,42 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('setting.config_data.enabled', true);
     }
 
+    public function test_only_admin_can_manage_global_settings(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->putJson('/api/settings/global_bala_mockup_config', [
+            'config_data' => [
+                'template_data' => 'data:image/png;base64,ZmFrZQ==',
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('setting.user_id', null)
+            ->assertJsonPath('setting.config_data.template_data', 'data:image/png;base64,ZmFrZQ==');
+
+        $user = User::factory()->create([
+            'role' => 'user',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->putJson('/api/settings/global_bala_mockup_config', [
+            'config_data' => [
+                'template_data' => 'data:image/png;base64,bm92bw==',
+            ],
+        ])->assertStatus(403);
+
+        $this->getJson('/api/settings/global_bala_mockup_config')
+            ->assertOk()
+            ->assertJsonPath('setting.config_data.template_data', 'data:image/png;base64,ZmFrZQ==');
+    }
+
     public function test_authenticated_user_can_create_and_list_pricing_materials(): void
     {
         $user = User::factory()->create([

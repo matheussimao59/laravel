@@ -42,7 +42,7 @@ final class AuthController
             'name' => $request->string('name')->toString(),
             'email' => $request->string('email')->toString(),
             'password' => $request->string('password')->toString(),
-            'role' => 'admin',
+            'role' => 'user',
             'is_active' => 1,
         ]);
 
