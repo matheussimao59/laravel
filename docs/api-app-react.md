@@ -44,6 +44,16 @@ Este backend Laravel agora cobre a base de dados interna usada pelo `app-react`,
   Capas de agenda.
 - `PATCH /api/cover-agenda/{id}/printed`
   Marca impressao.
+- `POST /api/integrations/mercado-livre/oauth/token`
+  Troca do codigo OAuth por `access_token`.
+- `POST /api/integrations/mercado-livre/sync`
+  Sincronizacao de vendedor e pedidos do Mercado Livre.
+- `POST /api/integrations/mercado-livre/customization`
+  Envio de mensagem de personalizacao para pedido/pacote.
+- `POST /api/integrations/fiscal/emit`
+  Emissao de NF via provedor externo.
+- `POST /api/integrations/fiscal/status`
+  Consulta de status de NF emitida.
 
 ## Banco de dados
 
@@ -65,13 +75,17 @@ As migrations novas criam as tabelas dos modulos internos:
 
 Tambem foi adicionada a compatibilidade do `users` com `role` e `is_active`.
 
-## O que ainda falta migrar
+## Integracoes externas
 
-Estas partes do `app-react` ainda dependem de integracao externa e precisam de uma camada de servico propria no backend:
+As integracoes externas usadas pelo `app-react-api` agora tambem passam pelo backend Laravel:
 
-- funcoes de OAuth e sincronizacao do Mercado Livre
-- funcoes de emissao/consulta de NF (`nf-emit`, `nf-status`)
-- cache local em `localStorage` ainda mantido no frontend
+- OAuth do Mercado Livre
+- sincronizacao de pedidos Mercado Livre
+- envio de mensagem de personalizacao
+- emissao de NF
+- consulta de status da NF
+
+O frontend ainda mantem apenas cache local em `localStorage` para melhorar carregamento e reduzir novas sincronizacoes.
 
 ## Status atual do frontend
 
@@ -79,22 +93,27 @@ O `app-react-api` ja usa esta API Laravel para:
 
 - autenticacao principal com Sanctum (`/api/auth/login`, `/api/auth/register`, `/api/auth/me`, `/api/auth/logout`)
 - modulos internos de configuracao, precificacao, pedidos, calendario, shipping, capa agenda e fiscal
+- integracoes Mercado Livre e fiscal consumindo endpoints Laravel
 
-No frontend, o Supabase ficou restrito apenas as integracoes externas ainda nao migradas:
+Sobrou apenas o arquivo cliente `src/lib/supabase.ts`, que pode ser removido quando nao houver mais uso em nenhuma tela.
 
-- `ml-sync`
-- `ml-oauth-token`
-- `ml-send-customization`
-- `nf-emit`
-- `nf-status`
+## Variaveis de ambiente do backend
+
+Defina no `.env` do Laravel as credenciais das integracoes:
+
+- `ML_CLIENT_ID`
+- `ML_CLIENT_SECRET`
+- `ML_BASE_URL` opcional
+- `NFE_PROVIDER_TOKEN`
+- `NFE_PROVIDER_BASE_URL`
+- `NFE_ISSUE_PATH`
+- `NFE_STATUS_PATH_TEMPLATE`
 
 ## Proximo passo recomendado
 
-Criar um cliente HTTP no `app-react` e migrar por modulo nesta ordem:
+Fechar a operacao em ambiente real:
 
-1. `DashboardPage`
-2. `PricingPage` e `ProductsPage`
-3. `CalendarPage`
-4. `MercadoLivreSeparacaoPage`
-5. `CapaAgendaPage`
-6. `NotaFiscalPage`
+1. configurar as variaveis das integracoes no `.env` do Laravel
+2. publicar a API atualizada no servidor
+3. apontar `VITE_API_BASE_URL` do frontend para a API publicada
+4. remover `src/lib/supabase.ts` se ele nao for mais usado

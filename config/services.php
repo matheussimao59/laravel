@@ -35,4 +35,17 @@ return [
         ],
     ],
 
+    'mercado_livre' => [
+        'client_id' => env('ML_CLIENT_ID'),
+        'client_secret' => env('ML_CLIENT_SECRET'),
+        'base_url' => env('ML_API_BASE_URL', 'https://api.mercadolibre.com'),
+    ],
+
+    'fiscal_provider' => [
+        'token' => env('NFE_PROVIDER_TOKEN'),
+        'base_url' => env('NFE_PROVIDER_BASE_URL', 'https://api.nuvemfiscal.com.br'),
+        'issue_path' => env('NFE_ISSUE_PATH', '/v1/nfe'),
+        'status_path_template' => env('NFE_STATUS_PATH_TEMPLATE', '/v1/nfe/{id}'),
+    ],
+
 ];

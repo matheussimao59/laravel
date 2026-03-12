@@ -8,9 +8,11 @@ use App\Http\Controllers\Api\FiscalDocumentController;
 use App\Http\Controllers\Api\FiscalSettingController;
 use App\Http\Controllers\Api\FinancialController;
 use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
 use App\Http\Controllers\Api\ShippingOrderController;
+use App\Http\Controllers\Api\FiscalProviderController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
@@ -55,4 +57,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/fiscal/documents', [FiscalDocumentController::class, 'store']);
     Route::patch('/fiscal/documents/{document}', [FiscalDocumentController::class, 'update']);
     Route::delete('/fiscal/documents/{document}', [FiscalDocumentController::class, 'destroy']);
+
+    Route::prefix('integrations/mercado-livre')->group(function () {
+        Route::post('/oauth/token', [MercadoLivreController::class, 'oauthToken']);
+        Route::post('/sync', [MercadoLivreController::class, 'sync']);
+        Route::post('/customization', [MercadoLivreController::class, 'sendCustomization']);
+    });
+
+    Route::prefix('integrations/fiscal')->group(function () {
+        Route::post('/emit', [FiscalProviderController::class, 'emit']);
+        Route::post('/status', [FiscalProviderController::class, 'status']);
+    });
 });
