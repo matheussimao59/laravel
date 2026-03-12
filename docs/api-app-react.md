@@ -69,10 +69,24 @@ Tambem foi adicionada a compatibilidade do `users` com `role` e `is_active`.
 
 Estas partes do `app-react` ainda dependem de integracao externa e precisam de uma camada de servico propria no backend:
 
-- login/logout do frontend ainda usa Supabase Auth
 - funcoes de OAuth e sincronizacao do Mercado Livre
 - funcoes de emissao/consulta de NF (`nf-emit`, `nf-status`)
 - cache local em `localStorage` ainda mantido no frontend
+
+## Status atual do frontend
+
+O `app-react-api` ja usa esta API Laravel para:
+
+- autenticacao principal com Sanctum (`/api/auth/login`, `/api/auth/register`, `/api/auth/me`, `/api/auth/logout`)
+- modulos internos de configuracao, precificacao, pedidos, calendario, shipping, capa agenda e fiscal
+
+No frontend, o Supabase ficou restrito apenas as integracoes externas ainda nao migradas:
+
+- `ml-sync`
+- `ml-oauth-token`
+- `ml-send-customization`
+- `nf-emit`
+- `nf-status`
 
 ## Proximo passo recomendado
 
