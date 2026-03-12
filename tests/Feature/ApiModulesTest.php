@@ -78,6 +78,35 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('materials.0.unit_of_measure', 'folha');
     }
 
+    public function test_authenticated_user_can_create_and_list_cover_agenda_items(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $imageData = 'data:image/png;base64,' . base64_encode('fake-image');
+
+        $this->postJson('/api/cover-agenda', [
+            'order_id' => '66',
+            'front_image' => $imageData,
+            'back_image' => $imageData,
+            'printed' => false,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('item.order_id', '66')
+            ->assertJsonPath('item.printed', false)
+            ->assertJsonPath('item.front_image', $imageData)
+            ->assertJsonPath('item.back_image', $imageData);
+
+        $this->getJson('/api/cover-agenda?limit=10')
+            ->assertOk()
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.order_id', '66');
+    }
+
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
     {
         $user = User::factory()->create([
