@@ -39,6 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/shipping/orders', [ShippingOrderController::class, 'index']);
     Route::post('/shipping/orders/import', [ShippingOrderController::class, 'import']);
     Route::get('/shipping/orders/scan', [ShippingOrderController::class, 'scan']);
+    Route::get('/shipping/orders/{order}/artwork', [ShippingOrderController::class, 'artwork']);
     Route::delete('/shipping/orders/by-date', [ShippingOrderController::class, 'destroyByDate']);
     Route::post('/shipping/orders/bulk-delete', [ShippingOrderController::class, 'bulkDelete']);
     Route::patch('/shipping/orders/{order}', [ShippingOrderController::class, 'update']);

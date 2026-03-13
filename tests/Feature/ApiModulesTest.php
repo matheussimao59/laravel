@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -141,6 +142,55 @@ class ApiModulesTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'items')
             ->assertJsonPath('items.0.order_id', '66');
+    }
+
+    public function test_scanner_can_load_linked_cover_and_calendar_artwork(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $shippingOrderId = DB::table('shipping_orders')->insertGetId([
+            'user_id' => $user->id,
+            'import_key' => 'scan-art-1',
+            'platform_order_number' => '123456',
+            'ad_name' => 'Agenda Pet',
+            'product_qty' => 1,
+            'tracking_number' => 'BR123456789',
+            'packed' => false,
+            'production_separated' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('cover_agenda_items')->insert([
+            'user_id' => $user->id,
+            'order_id' => '123456',
+            'front_image' => 'data:image/png;base64,' . base64_encode('front'),
+            'back_image' => 'data:image/png;base64,' . base64_encode('back'),
+            'printed' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('calendar_orders')->insert([
+            'user_id' => $user->id,
+            'order_id' => '123456',
+            'image_data' => 'data:image/png;base64,' . base64_encode('calendar'),
+            'quantity' => 2,
+            'printed' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson("/api/shipping/orders/{$shippingOrderId}/artwork")
+            ->assertOk()
+            ->assertJsonPath('artwork.cover_agenda.order_id', '123456')
+            ->assertJsonPath('artwork.calendar.order_id', '123456')
+            ->assertJsonPath('artwork.calendar.quantity', 2);
     }
 
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void

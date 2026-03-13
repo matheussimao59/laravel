@@ -348,6 +348,57 @@ final class ShippingOrderController
         return response()->json(['message' => 'Pedido excluido com sucesso.', 'id' => $order]);
     }
 
+    public function artwork(Request $request, string $order): JsonResponse
+    {
+        $row = $this->findOwnedRow($request, $order);
+        if (!$row) {
+            return response()->json(['message' => 'Pedido nao encontrado.'], 404);
+        }
+
+        $orderIds = array_values(array_unique(array_filter([
+            trim((string) ($row->platform_order_number ?? '')),
+            trim((string) $row->id),
+        ])));
+
+        $cover = null;
+        $calendar = null;
+
+        if ($orderIds !== []) {
+            $cover = DB::table('cover_agenda_items')
+                ->where('user_id', $row->user_id)
+                ->whereIn('order_id', $orderIds)
+                ->orderByDesc('updated_at')
+                ->first();
+
+            $calendar = DB::table('calendar_orders')
+                ->where('user_id', $row->user_id)
+                ->whereIn('order_id', $orderIds)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
+
+        return response()->json([
+            'artwork' => [
+                'cover_agenda' => $cover ? [
+                    'id' => (string) $cover->id,
+                    'order_id' => $cover->order_id,
+                    'front_image' => $cover->front_image ?? $cover->front_image_path ?? null,
+                    'back_image' => $cover->back_image ?? $cover->back_image_path ?? null,
+                    'printed' => (bool) $cover->printed,
+                    'updated_at' => $cover->updated_at,
+                ] : null,
+                'calendar' => $calendar ? [
+                    'id' => (string) $calendar->id,
+                    'order_id' => $calendar->order_id,
+                    'image_data' => $calendar->image_data,
+                    'quantity' => (int) ($calendar->quantity ?? 1),
+                    'printed' => (bool) $calendar->printed,
+                    'updated_at' => $calendar->updated_at,
+                ] : null,
+            ],
+        ]);
+    }
+
     public function bulkDelete(Request $request): JsonResponse
     {
         $user = $request->user();
