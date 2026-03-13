@@ -168,7 +168,7 @@ class ApiModulesTest extends TestCase
 
         DB::table('cover_agenda_items')->insert([
             'user_id' => $user->id,
-            'order_id' => '#123456',
+            'order_id' => 'Pedido #123456',
             'front_image' => 'data:image/png;base64,' . base64_encode('front'),
             'back_image' => 'data:image/png;base64,' . base64_encode('back'),
             'printed' => false,
@@ -178,7 +178,7 @@ class ApiModulesTest extends TestCase
 
         DB::table('calendar_orders')->insert([
             'user_id' => $user->id,
-            'order_id' => '123456',
+            'order_id' => 'ID: #123456',
             'image_data' => 'data:image/png;base64,' . base64_encode('calendar'),
             'quantity' => 2,
             'printed' => false,
@@ -188,8 +188,8 @@ class ApiModulesTest extends TestCase
 
         $this->getJson("/api/shipping/orders/{$shippingOrderId}/artwork")
             ->assertOk()
-            ->assertJsonPath('artwork.cover_agenda.order_id', '#123456')
-            ->assertJsonPath('artwork.calendar.order_id', '123456')
+            ->assertJsonPath('artwork.cover_agenda.order_id', 'Pedido #123456')
+            ->assertJsonPath('artwork.calendar.order_id', 'ID: #123456')
             ->assertJsonPath('artwork.calendar.quantity', 2);
     }
 

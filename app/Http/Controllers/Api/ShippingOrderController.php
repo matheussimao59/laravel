@@ -412,10 +412,9 @@ final class ShippingOrderController
             if ($normalized !== '' && !in_array($normalized, $candidates, true)) {
                 $candidates[] = $normalized;
             }
-            if (str_starts_with($string, '#')) {
-                $withoutHash = ltrim($string, '#');
-                if ($withoutHash !== '' && !in_array($withoutHash, $candidates, true)) {
-                    $candidates[] = $withoutHash;
+            foreach ($this->artworkDisplayVariants($normalized) as $variant) {
+                if (!in_array($variant, $candidates, true)) {
+                    $candidates[] = $variant;
                 }
             }
         }
@@ -440,6 +439,21 @@ final class ShippingOrderController
 
         if ($exact) {
             return $exact;
+        }
+
+        $uppercaseOrderIds = array_values(array_unique(array_map('strtoupper', $orderIds)));
+        $caseInsensitive = DB::table($table)
+            ->where('user_id', $userId)
+            ->where(function ($builder) use ($uppercaseOrderIds) {
+                foreach ($uppercaseOrderIds as $candidate) {
+                    $builder->orWhereRaw('upper(order_id) = ?', [$candidate]);
+                }
+            })
+            ->orderByDesc('updated_at')
+            ->first();
+
+        if ($caseInsensitive) {
+            return $caseInsensitive;
         }
 
         $normalizedOrderIds = array_values(array_unique(array_filter(array_map(
@@ -565,7 +579,31 @@ final class ShippingOrderController
 
     private function normalizeArtworkOrderId(string $value): string
     {
-        return strtoupper(str_replace(['#', ' ', '-'], '', trim($value)));
+        $normalized = strtoupper(trim($value));
+        $normalized = preg_replace('/^(PEDIDO|ID)\s*:?\s*/', '', $normalized) ?: $normalized;
+        $normalized = str_replace(['#', ' ', '-', ':'], '', $normalized);
+        return trim($normalized);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function artworkDisplayVariants(string $normalized): array
+    {
+        if ($normalized === '') {
+            return [];
+        }
+
+        return [
+            '#' . $normalized,
+            'ID: #' . $normalized,
+            'ID #' . $normalized,
+            'ID:' . $normalized,
+            'ID ' . $normalized,
+            'PEDIDO #' . $normalized,
+            'PEDIDO: #' . $normalized,
+            'PEDIDO ' . $normalized,
+        ];
     }
 
     private function isBlank(mixed $value): bool
