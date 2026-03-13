@@ -355,27 +355,11 @@ final class ShippingOrderController
             return response()->json(['message' => 'Pedido nao encontrado.'], 404);
         }
 
-        $orderIds = array_values(array_unique(array_filter([
-            trim((string) ($row->platform_order_number ?? '')),
-            trim((string) $row->id),
-        ])));
+        $raw = $this->decodeJson($row->row_raw) ?: [];
+        $orderIds = $this->artworkLookupCandidates($row, $raw);
 
-        $cover = null;
-        $calendar = null;
-
-        if ($orderIds !== []) {
-            $cover = DB::table('cover_agenda_items')
-                ->where('user_id', $row->user_id)
-                ->whereIn('order_id', $orderIds)
-                ->orderByDesc('updated_at')
-                ->first();
-
-            $calendar = DB::table('calendar_orders')
-                ->where('user_id', $row->user_id)
-                ->whereIn('order_id', $orderIds)
-                ->orderByDesc('updated_at')
-                ->first();
-        }
+        $cover = $this->findLinkedArtworkRow('cover_agenda_items', $row->user_id, $orderIds);
+        $calendar = $this->findLinkedArtworkRow('calendar_orders', $row->user_id, $orderIds);
 
         return response()->json([
             'artwork' => [
@@ -397,6 +381,88 @@ final class ShippingOrderController
                 ] : null,
             ],
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     * @return list<string>
+     */
+    private function artworkLookupCandidates(object $row, array $raw): array
+    {
+        $values = [
+            $row->platform_order_number ?? null,
+            $row->id ?? null,
+            $raw['order'] ?? null,
+            $raw['pedido'] ?? null,
+            $raw['platform_order_number'] ?? null,
+            $raw['n de pedido da plataforma'] ?? null,
+            $raw['numero do pedido da plataforma'] ?? null,
+            $raw['n do pedido'] ?? null,
+        ];
+
+        $candidates = [];
+        foreach ($values as $value) {
+            $string = trim((string) $value);
+            if ($string === '') {
+                continue;
+            }
+
+            $candidates[] = $string;
+            $normalized = $this->normalizeArtworkOrderId($string);
+            if ($normalized !== '' && !in_array($normalized, $candidates, true)) {
+                $candidates[] = $normalized;
+            }
+            if (str_starts_with($string, '#')) {
+                $withoutHash = ltrim($string, '#');
+                if ($withoutHash !== '' && !in_array($withoutHash, $candidates, true)) {
+                    $candidates[] = $withoutHash;
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($candidates)));
+    }
+
+    /**
+     * @param list<string> $orderIds
+     */
+    private function findLinkedArtworkRow(string $table, int|string $userId, array $orderIds): ?object
+    {
+        if ($orderIds === []) {
+            return null;
+        }
+
+        $exact = DB::table($table)
+            ->where('user_id', $userId)
+            ->whereIn('order_id', $orderIds)
+            ->orderByDesc('updated_at')
+            ->first();
+
+        if ($exact) {
+            return $exact;
+        }
+
+        $normalizedOrderIds = array_values(array_unique(array_filter(array_map(
+            fn (string $value) => $this->normalizeArtworkOrderId($value),
+            $orderIds
+        ))));
+
+        if ($normalizedOrderIds === []) {
+            return null;
+        }
+
+        return DB::table($table)
+            ->where('user_id', $userId)
+            ->where(function ($builder) use ($normalizedOrderIds) {
+                foreach ($normalizedOrderIds as $candidate) {
+                    $builder->orWhereRaw(
+                        "replace(replace(replace(upper(trim(order_id)), '#', ''), ' ', ''), '-', '') = ?",
+                        [$candidate]
+                    );
+                }
+            })
+            ->orderByDesc('updated_at')
+            ->first();
     }
 
     public function bulkDelete(Request $request): JsonResponse
@@ -495,6 +561,11 @@ final class ShippingOrderController
         }
 
         return null;
+    }
+
+    private function normalizeArtworkOrderId(string $value): string
+    {
+        return strtoupper(str_replace(['#', ' ', '-'], '', trim($value)));
     }
 
     private function isBlank(mixed $value): bool
