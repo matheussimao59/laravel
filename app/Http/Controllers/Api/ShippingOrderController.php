@@ -465,7 +465,7 @@ final class ShippingOrderController
             return null;
         }
 
-        return DB::table($table)
+        $normalizedMatch = DB::table($table)
             ->where('user_id', $userId)
             ->where(function ($builder) use ($normalizedOrderIds) {
                 foreach ($normalizedOrderIds as $candidate) {
@@ -477,6 +477,31 @@ final class ShippingOrderController
             })
             ->orderByDesc('updated_at')
             ->first();
+
+        if ($normalizedMatch) {
+            return $normalizedMatch;
+        }
+
+        $recentRows = DB::table($table)
+            ->where('user_id', $userId)
+            ->orderByDesc('updated_at')
+            ->limit(400)
+            ->get();
+
+        foreach ($recentRows as $recentRow) {
+            $stored = $this->normalizeArtworkOrderId((string) ($recentRow->order_id ?? ''));
+            if ($stored === '') {
+                continue;
+            }
+
+            foreach ($normalizedOrderIds as $candidate) {
+                if ($stored === $candidate || str_contains($stored, $candidate) || str_contains($candidate, $stored)) {
+                    return $recentRow;
+                }
+            }
+        }
+
+        return null;
     }
 
     public function bulkDelete(Request $request): JsonResponse
