@@ -188,16 +188,40 @@ final class ShippingOrderController
             return response()->json(['message' => 'Informe um termo de busca em `q`, `tracking` ou `order`.'], 422);
         }
 
+        $prefixTerm = $term . '%';
+        $likeTerm = '%' . $term . '%';
+
         $rows = DB::table('shipping_orders')
             ->where('user_id', $user->id)
             ->where(function ($builder) use ($term) {
                 $builder
-                    ->where('tracking_number', 'like', '%' . $term . '%')
-                    ->orWhere('platform_order_number', 'like', '%' . $term . '%')
-                    ->orWhere('recipient_name', 'like', '%' . $term . '%');
+                    ->where('tracking_number', $term)
+                    ->orWhere('platform_order_number', $term);
             })
+            ->orWhere(function ($builder) use ($user, $prefixTerm, $likeTerm) {
+                $builder
+                    ->where('user_id', $user->id)
+                    ->where(function ($inner) use ($prefixTerm, $likeTerm) {
+                        $inner
+                            ->where('tracking_number', 'like', $prefixTerm)
+                            ->orWhere('platform_order_number', 'like', $prefixTerm)
+                            ->orWhere('tracking_number', 'like', $likeTerm)
+                            ->orWhere('platform_order_number', 'like', $likeTerm)
+                            ->orWhere('recipient_name', 'like', $likeTerm);
+                    });
+            })
+            ->orderByRaw(
+                "case
+                    when tracking_number = ? then 0
+                    when platform_order_number = ? then 1
+                    when tracking_number like ? then 2
+                    when platform_order_number like ? then 3
+                    else 4
+                end",
+                [$term, $term, $prefixTerm, $prefixTerm]
+            )
             ->orderByDesc('updated_at')
-            ->limit(50)
+            ->limit(20)
             ->get()
             ->map(fn ($row) => $this->mapRow($row))
             ->values();
