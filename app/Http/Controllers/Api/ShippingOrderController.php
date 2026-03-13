@@ -465,43 +465,18 @@ final class ShippingOrderController
             return null;
         }
 
-        $normalizedMatch = DB::table($table)
+        return DB::table($table)
             ->where('user_id', $userId)
             ->where(function ($builder) use ($normalizedOrderIds) {
                 foreach ($normalizedOrderIds as $candidate) {
                     $builder->orWhereRaw(
-                        "replace(replace(replace(upper(trim(order_id)), '#', ''), ' ', ''), '-', '') = ?",
+                        $this->normalizedArtworkOrderSql() . " = ?",
                         [$candidate]
                     );
                 }
             })
             ->orderByDesc('updated_at')
             ->first();
-
-        if ($normalizedMatch) {
-            return $normalizedMatch;
-        }
-
-        $recentRows = DB::table($table)
-            ->where('user_id', $userId)
-            ->orderByDesc('updated_at')
-            ->limit(400)
-            ->get();
-
-        foreach ($recentRows as $recentRow) {
-            $stored = $this->normalizeArtworkOrderId((string) ($recentRow->order_id ?? ''));
-            if ($stored === '') {
-                continue;
-            }
-
-            foreach ($normalizedOrderIds as $candidate) {
-                if ($stored === $candidate || str_contains($stored, $candidate) || str_contains($candidate, $stored)) {
-                    return $recentRow;
-                }
-            }
-        }
-
-        return null;
     }
 
     public function bulkDelete(Request $request): JsonResponse
@@ -608,6 +583,11 @@ final class ShippingOrderController
         $normalized = preg_replace('/^(PEDIDO|ID)\s*:?\s*/', '', $normalized) ?: $normalized;
         $normalized = str_replace(['#', ' ', '-', ':'], '', $normalized);
         return trim($normalized);
+    }
+
+    private function normalizedArtworkOrderSql(): string
+    {
+        return "replace(replace(replace(replace(replace(upper(trim(order_id)), 'PEDIDO', ''), 'ID', ''), '#', ''), ' ', ''), '-', '')";
     }
 
     /**
