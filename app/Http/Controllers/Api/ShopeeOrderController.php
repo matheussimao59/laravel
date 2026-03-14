@@ -53,8 +53,8 @@ final class ShopeeOrderController
         $mappedRows = $rows
             ->map(function ($row) use ($productMap) {
                 $product = $productMap[$this->normalizeProductName((string) ($row->product_name ?? ''))] ?? null;
-                $cost = (float) ($product['production_cost'] ?? 0);
                 $revenue = (float) $row->revenue_amount;
+                $hasRegisteredCost = $this->hasRegisteredProductCost($product);
 
                 return [
                     'id' => (string) $row->id,
@@ -74,8 +74,9 @@ final class ShopeeOrderController
                     'source_file_name' => $row->source_file_name,
                     'row_raw' => $this->decodeJson($row->row_raw),
                     'financial_status' => $revenue > 0 ? 'received' : 'unpaid',
+                    'has_registered_cost' => $hasRegisteredCost,
                     'linked_product' => $product,
-                    'estimated_net_profit' => $product ? round($revenue - $cost, 2) : null,
+                    'estimated_net_profit' => $this->calculateNetProfit($revenue, $product),
                 ];
             })
             ->values();
@@ -83,6 +84,21 @@ final class ShopeeOrderController
         $profitTotal = round(
             $mappedRows->reduce(function (float $carry, array $row) {
                 return $carry + (float) ($row['estimated_net_profit'] ?? 0);
+            }, 0),
+            2
+        );
+
+        $missingCostRows = (int) $mappedRows
+            ->filter(fn (array $row) => (float) $row['revenue_amount'] > 0 && !$row['has_registered_cost'])
+            ->count();
+
+        $missingCostTotal = round(
+            $mappedRows->reduce(function (float $carry, array $row) {
+                if ((float) $row['revenue_amount'] <= 0 || $row['has_registered_cost']) {
+                    return $carry;
+                }
+
+                return $carry + (float) $row['revenue_amount'];
             }, 0),
             2
         );
@@ -144,10 +160,10 @@ final class ShopeeOrderController
                 });
             })
             ->orderBy('order_created_at')
-            ->get(['order_created_at', 'revenue_amount']);
+            ->get(['order_created_at', 'product_name', 'revenue_amount']);
 
         $chartSeries = collect($chartYears)
-            ->map(function (int $chartYear) use ($chartRows) {
+            ->map(function (int $chartYear) use ($chartRows, $productMap) {
                 $monthlyTotals = array_fill(1, 12, 0.0);
 
                 foreach ($chartRows as $row) {
@@ -161,7 +177,13 @@ final class ShopeeOrderController
                     }
 
                     $monthNumber = (int) $matches[2];
-                    $monthlyTotals[$monthNumber] += (float) $row->revenue_amount;
+                    $product = $productMap[$this->normalizeProductName((string) ($row->product_name ?? ''))] ?? null;
+                    $netProfit = $this->calculateNetProfit((float) $row->revenue_amount, $product);
+                    if ($netProfit === null) {
+                        continue;
+                    }
+
+                    $monthlyTotals[$monthNumber] += $netProfit;
                 }
 
                 $values = array_map(
@@ -184,6 +206,8 @@ final class ShopeeOrderController
                 'unpaid_total' => (float) ($summary->unpaid_total ?? 0),
                 'product_total' => (int) ($summary->product_total ?? 0),
                 'profit_total' => $profitTotal,
+                'missing_cost_rows' => $missingCostRows,
+                'missing_cost_total' => $missingCostTotal,
             ],
             'rows' => $mappedRows,
             'filters' => $filters,
@@ -594,6 +618,20 @@ final class ShopeeOrderController
         }
 
         return $value;
+    }
+
+    private function hasRegisteredProductCost(?array $product): bool
+    {
+        return $product !== null && (float) ($product['production_cost'] ?? 0) > 0;
+    }
+
+    private function calculateNetProfit(float $revenue, ?array $product): ?float
+    {
+        if (!$this->hasRegisteredProductCost($product)) {
+            return null;
+        }
+
+        return round($revenue - (float) ($product['production_cost'] ?? 0), 2);
     }
 
     private function isAdmin(?string $role): bool

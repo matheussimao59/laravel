@@ -360,6 +360,72 @@ class ApiModulesTest extends TestCase
         $this->assertDatabaseCount('shopee_products', 1);
     }
 
+    public function test_shopee_summary_marks_sales_without_registered_product_cost(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('shopee_products')->insert([
+            [
+                'user_id' => $user->id,
+                'product_name' => 'Produto Sem Custo',
+                'original_price' => 120,
+                'production_cost' => 0,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => $user->id,
+                'product_name' => 'Produto Com Custo',
+                'original_price' => 140,
+                'production_cost' => 15,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('shopee_order_reports')->insert([
+            [
+                'user_id' => $user->id,
+                'import_key' => 'missing-cost-order',
+                'sequence_number' => 1,
+                'order_id' => 'MC-1',
+                'product_name' => 'Produto Sem Custo',
+                'order_created_at' => '2024-10-10',
+                'revenue_amount' => 100,
+                'product_price' => 120,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => $user->id,
+                'import_key' => 'with-cost-order',
+                'sequence_number' => 2,
+                'order_id' => 'WC-1',
+                'product_name' => 'Produto Com Custo',
+                'order_created_at' => '2024-10-11',
+                'revenue_amount' => 80,
+                'product_price' => 140,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $this->getJson('/api/shopee/orders?year=2024&month=10')
+            ->assertOk()
+            ->assertJsonPath('summary.profit_total', 65)
+            ->assertJsonPath('summary.missing_cost_rows', 1)
+            ->assertJsonPath('summary.missing_cost_total', 100)
+            ->assertJsonPath('rows.0.product_name', 'Produto Com Custo')
+            ->assertJsonPath('rows.0.estimated_net_profit', 65)
+            ->assertJsonPath('rows.1.product_name', 'Produto Sem Custo')
+            ->assertJsonPath('rows.1.estimated_net_profit', null);
+    }
+
     public function test_admin_can_delete_all_shopee_orders_for_a_year(): void
     {
         $user = User::factory()->create([
@@ -512,6 +578,25 @@ class ApiModulesTest extends TestCase
 
         Sanctum::actingAs($user);
 
+        DB::table('shopee_products')->insert([
+            [
+                'user_id' => $user->id,
+                'product_name' => 'Produto A',
+                'original_price' => 120,
+                'production_cost' => 40,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => $user->id,
+                'product_name' => 'Produto B',
+                'original_price' => 180,
+                'production_cost' => 25,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
         DB::table('shopee_order_reports')->insert([
             [
                 'user_id' => $user->id,
@@ -556,10 +641,10 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('chart.available_years.0', 2024)
             ->assertJsonPath('chart.available_years.1', 2025)
             ->assertJsonPath('chart.series.0.year', 2024)
-            ->assertJsonPath('chart.series.0.values.0', 100)
-            ->assertJsonPath('chart.series.0.values.1', 200)
+            ->assertJsonPath('chart.series.0.values.0', 60)
+            ->assertJsonPath('chart.series.0.values.1', 160)
             ->assertJsonPath('chart.series.1.year', 2025)
-            ->assertJsonPath('chart.series.1.values.0', 150);
+            ->assertJsonPath('chart.series.1.values.0', 125);
     }
 
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
