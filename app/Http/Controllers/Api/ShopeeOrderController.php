@@ -166,7 +166,7 @@ final class ShopeeOrderController
                 'order_type' => ['nullable', 'string', 'max:120'],
                 'hot_listing' => ['nullable', 'string', 'max:30'],
                 'revenue_amount' => ['nullable', 'numeric'],
-                'product_price' => ['nullable', 'numeric', 'min:0'],
+                'product_price' => ['nullable', 'numeric'],
                 'source_file_name' => ['nullable', 'string', 'max:190'],
                 'row_raw' => ['nullable', 'array'],
             ]);
@@ -233,6 +233,7 @@ final class ShopeeOrderController
             $normalizedName = $this->normalizeProductName((string) ($row['product_name'] ?? ''));
             $productName = trim((string) ($row['product_name'] ?? ''));
             $productPrice = round((float) ($row['product_price'] ?? 0), 2);
+            $positiveProductPrice = max(0, $productPrice);
 
             if ($normalizedName === '' || $productName === '') {
                 continue;
@@ -242,7 +243,7 @@ final class ShopeeOrderController
                 $productId = DB::table('shopee_products')->insertGetId([
                     'user_id' => $user->id,
                     'product_name' => $productName,
-                    'original_price' => $productPrice,
+                    'original_price' => $positiveProductPrice,
                     'production_cost' => 0,
                     'materials_json' => null,
                     'created_at' => now(),
@@ -252,7 +253,7 @@ final class ShopeeOrderController
                 $productMap[$normalizedName] = (object) [
                     'id' => $productId,
                     'product_name' => $productName,
-                    'original_price' => $productPrice,
+                    'original_price' => $positiveProductPrice,
                     'production_cost' => 0,
                     'materials_json' => null,
                 ];
@@ -261,15 +262,15 @@ final class ShopeeOrderController
             }
 
             $existingProduct = $productMap[$normalizedName];
-            if ((float) ($existingProduct->original_price ?? 0) <= 0 && $productPrice > 0) {
+            if ((float) ($existingProduct->original_price ?? 0) <= 0 && $positiveProductPrice > 0) {
                 DB::table('shopee_products')
                     ->where('id', $existingProduct->id)
                     ->update([
-                        'original_price' => $productPrice,
+                        'original_price' => $positiveProductPrice,
                         'updated_at' => now(),
                     ]);
 
-                $existingProduct->original_price = $productPrice;
+                $existingProduct->original_price = $positiveProductPrice;
                 $productMap[$normalizedName] = $existingProduct;
                 $productsUpdated++;
             }

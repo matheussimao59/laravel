@@ -251,6 +251,45 @@ class ApiModulesTest extends TestCase
         $this->assertDatabaseCount('shopee_products', 1);
     }
 
+    public function test_admin_can_import_shopee_rows_with_negative_product_price_adjustments(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/shopee/orders/import', [
+            'rows' => [
+                [
+                    'import_key' => 'shopee-negative-1',
+                    'sequence_number' => 378,
+                    'order_id' => '241005QW5JWV1Q',
+                    'sku' => '20677569790',
+                    'product_name' => '100 Balas Personalizadas Outubro Rosa Mimo Para Cliente, Festa, Lembrancinha Personalizada',
+                    'order_created_at' => '2024-10-05',
+                    'payment_completed_at' => '2024-11-01',
+                    'release_channel' => 'Carteira do vendedor',
+                    'order_type' => 'Pedido normal',
+                    'hot_listing' => 'NO',
+                    'revenue_amount' => -0.29,
+                    'product_price' => -0.29,
+                    'row_raw' => ['source' => 'csv'],
+                ],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.inserted', 1)
+            ->assertJsonPath('stats.products_created', 1);
+
+        $this->assertDatabaseHas('shopee_products', [
+            'user_id' => $user->id,
+            'product_name' => '100 Balas Personalizadas Outubro Rosa Mimo Para Cliente, Festa, Lembrancinha Personalizada',
+            'original_price' => 0,
+        ]);
+    }
+
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
     {
         $user = User::factory()->create([
