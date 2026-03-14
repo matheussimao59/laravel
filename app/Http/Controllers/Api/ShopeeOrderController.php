@@ -392,6 +392,50 @@ final class ShopeeOrderController
         ]);
     }
 
+    public function destroyProducts(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (!$this->isAdmin($user->role ?? null)) {
+            return response()->json(['message' => 'Acesso permitido apenas para admin.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['required'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Selecione ao menos um produto para excluir.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $ids = collect($request->input('ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return response()->json(['message' => 'Selecione produtos validos para excluir.'], 422);
+        }
+
+        $deleted = DB::table('shopee_products')
+            ->where('user_id', $user->id)
+            ->whereIn('id', $ids)
+            ->delete();
+
+        return response()->json([
+            'message' => "{$deleted} produto(s) Shopee excluido(s) com sucesso.",
+            'deleted' => $deleted,
+        ]);
+    }
+
     private function loadProductMap(int $userId, Collection $rows): array
     {
         if ($rows->isEmpty()) {

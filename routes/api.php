@@ -50,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/shopee/orders/import', [ShopeeOrderController::class, 'import']);
     Route::delete('/shopee/orders/by-year', [ShopeeOrderController::class, 'destroyYear']);
     Route::patch('/shopee/products/{product}', [ShopeeOrderController::class, 'updateProduct']);
+    Route::post('/shopee/products/bulk-delete', [ShopeeOrderController::class, 'destroyProducts']);
 
     Route::apiResource('cover-agenda', CoverAgendaController::class);
     Route::patch('/cover-agenda/{cover}/printed', [CoverAgendaController::class, 'markPrinted']);
