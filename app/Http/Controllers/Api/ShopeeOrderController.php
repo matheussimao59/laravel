@@ -25,7 +25,11 @@ final class ShopeeOrderController
         $month = max(0, min(12, (int) $request->query('month', 0)));
         $limit = max(1, min(500, (int) $request->query('limit', 250)));
 
-        $query = DB::table('shopee_order_reports')->where('user_id', $user->id);
+        $query = DB::table('shopee_order_reports')
+            ->where('user_id', $user->id)
+            ->whereNotNull('product_name')
+            ->whereRaw("trim(product_name) <> ''")
+            ->whereRaw("trim(product_name) <> '-'");
         if ($year > 0) {
             $query->whereYear('order_created_at', $year);
         }
@@ -37,7 +41,7 @@ final class ShopeeOrderController
             ->selectRaw('count(*) as total_rows')
             ->selectRaw('coalesce(sum(case when revenue_amount > 0 then revenue_amount else 0 end), 0) as received_total')
             ->selectRaw('coalesce(sum(case when revenue_amount <= 0 then revenue_amount else 0 end), 0) as unpaid_total')
-            ->selectRaw('coalesce(sum(product_price), 0) as product_total')
+            ->selectRaw('count(distinct product_name) as product_total')
             ->first();
 
         $rows = (clone $query)
@@ -79,8 +83,18 @@ final class ShopeeOrderController
             })
             ->values();
 
+        $profitTotal = round(
+            $mappedRows->reduce(function (float $carry, array $row) {
+                return $carry + (float) ($row['estimated_net_profit'] ?? 0);
+            }, 0),
+            2
+        );
+
         $filters = DB::table('shopee_order_reports')
             ->where('user_id', $user->id)
+            ->whereNotNull('product_name')
+            ->whereRaw("trim(product_name) <> ''")
+            ->whereRaw("trim(product_name) <> '-'")
             ->whereNotNull('order_created_at')
             ->orderByDesc('order_created_at')
             ->get(['order_created_at'])
@@ -109,7 +123,8 @@ final class ShopeeOrderController
                 'total_rows' => (int) ($summary->total_rows ?? 0),
                 'received_total' => (float) ($summary->received_total ?? 0),
                 'unpaid_total' => (float) ($summary->unpaid_total ?? 0),
-                'product_total' => (float) ($summary->product_total ?? 0),
+                'product_total' => (int) ($summary->product_total ?? 0),
+                'profit_total' => $profitTotal,
             ],
             'rows' => $mappedRows,
             'filters' => $filters,
@@ -150,6 +165,11 @@ final class ShopeeOrderController
 
         foreach ($rows as $row) {
             if (!is_array($row)) {
+                continue;
+            }
+
+            $productName = trim((string) ($row['product_name'] ?? ''));
+            if ($productName === '' || $productName === '-') {
                 continue;
             }
 
@@ -230,8 +250,7 @@ final class ShopeeOrderController
                 }
             }
 
-            $normalizedName = $this->normalizeProductName((string) ($row['product_name'] ?? ''));
-            $productName = trim((string) ($row['product_name'] ?? ''));
+            $normalizedName = $this->normalizeProductName($productName);
             $productPrice = round((float) ($row['product_price'] ?? 0), 2);
             $positiveProductPrice = max(0, $productPrice);
 
