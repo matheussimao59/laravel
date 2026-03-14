@@ -306,6 +306,60 @@ class ApiModulesTest extends TestCase
         ]);
     }
 
+    public function test_admin_import_ignores_existing_shopee_product_titles(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $productId = DB::table('shopee_products')->insertGetId([
+            'user_id' => $user->id,
+            'product_name' => 'Produto Existente Shopee',
+            'original_price' => 15.50,
+            'production_cost' => 4.25,
+            'materials_json' => json_encode(['items' => [['name' => 'Papel', 'cost' => 1.2]]]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->postJson('/api/shopee/orders/import', [
+            'rows' => [
+                [
+                    'import_key' => 'shopee-existing-product-1',
+                    'sequence_number' => 1,
+                    'order_id' => 'PED-EXISTENTE-1',
+                    'sku' => 'SKU-1',
+                    'product_name' => 'Produto Existente Shopee',
+                    'order_created_at' => '2024-10-07',
+                    'payment_completed_at' => '2024-11-16',
+                    'release_channel' => 'Carteira do vendedor',
+                    'order_type' => 'Pedido normal',
+                    'hot_listing' => 'NO',
+                    'revenue_amount' => 31.72,
+                    'product_price' => 99.90,
+                    'row_raw' => ['source' => 'xlsx'],
+                ],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.inserted', 1)
+            ->assertJsonPath('stats.products_created', 0)
+            ->assertJsonPath('stats.products_updated', 0);
+
+        $this->assertDatabaseHas('shopee_products', [
+            'id' => $productId,
+            'user_id' => $user->id,
+            'product_name' => 'Produto Existente Shopee',
+            'original_price' => 15.50,
+            'production_cost' => 4.25,
+        ]);
+
+        $this->assertDatabaseCount('shopee_products', 1);
+    }
+
     public function test_admin_can_delete_all_shopee_orders_for_a_year(): void
     {
         $user = User::factory()->create([

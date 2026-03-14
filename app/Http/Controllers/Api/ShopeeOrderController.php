@@ -224,7 +224,6 @@ final class ShopeeOrderController
         $updated = 0;
         $unchanged = 0;
         $productsCreated = 0;
-        $productsUpdated = 0;
         $skippedNonPositive = 0;
 
         foreach ($rows as $row) {
@@ -350,19 +349,7 @@ final class ShopeeOrderController
                 continue;
             }
 
-            $existingProduct = $productMap[$normalizedName];
-            if ((float) ($existingProduct->original_price ?? 0) <= 0 && $positiveProductPrice > 0) {
-                DB::table('shopee_products')
-                    ->where('id', $existingProduct->id)
-                    ->update([
-                        'original_price' => $positiveProductPrice,
-                        'updated_at' => now(),
-                    ]);
-
-                $existingProduct->original_price = $positiveProductPrice;
-                $productMap[$normalizedName] = $existingProduct;
-                $productsUpdated++;
-            }
+            // Existing product titles are ignored during import to preserve manual product data.
         }
 
         return response()->json([
@@ -373,7 +360,7 @@ final class ShopeeOrderController
                 'unchanged' => $unchanged,
                 'skipped_non_positive' => $skippedNonPositive,
                 'products_created' => $productsCreated,
-                'products_updated' => $productsUpdated,
+                'products_updated' => 0,
             ],
         ]);
     }
