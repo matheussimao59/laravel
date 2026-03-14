@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
 use App\Http\Controllers\Api\ShippingOrderController;
+use App\Http\Controllers\Api\ShopeeOrderController;
 use App\Http\Controllers\Api\FiscalProviderController;
 use Illuminate\Support\Facades\Route;
 
@@ -44,6 +45,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/shipping/orders/bulk-delete', [ShippingOrderController::class, 'bulkDelete']);
     Route::patch('/shipping/orders/{order}', [ShippingOrderController::class, 'update']);
     Route::delete('/shipping/orders/{order}', [ShippingOrderController::class, 'destroy']);
+
+    Route::get('/shopee/orders', [ShopeeOrderController::class, 'index']);
+    Route::post('/shopee/orders/import', [ShopeeOrderController::class, 'import']);
 
     Route::apiResource('cover-agenda', CoverAgendaController::class);
     Route::patch('/cover-agenda/{cover}/printed', [CoverAgendaController::class, 'markPrinted']);

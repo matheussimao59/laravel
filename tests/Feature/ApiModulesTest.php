@@ -193,6 +193,63 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('artwork.calendar.quantity', 2);
     }
 
+    public function test_admin_can_import_shopee_rows_filter_by_month_and_auto_create_unique_products(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/shopee/orders/import', [
+            'rows' => [
+                [
+                    'import_key' => 'shopee-1',
+                    'sequence_number' => 1,
+                    'order_id' => '2410080W8BJV43',
+                    'sku' => '20677569790',
+                    'product_name' => '100 Cartao de agradecimento ao cliente com bala Personalizada',
+                    'order_created_at' => '2024-10-07',
+                    'payment_completed_at' => '2024-11-16',
+                    'release_channel' => 'Carteira do vendedor',
+                    'order_type' => 'Pedido normal',
+                    'hot_listing' => 'NO',
+                    'revenue_amount' => 31.72,
+                    'product_price' => 47.00,
+                    'row_raw' => ['source' => 'xlsx'],
+                ],
+                [
+                    'import_key' => 'shopee-2',
+                    'sequence_number' => 2,
+                    'order_id' => '24101196Q9UTGD',
+                    'sku' => '20677569790',
+                    'product_name' => '100 Cartao de agradecimento ao cliente com bala Personalizada',
+                    'order_created_at' => '2024-10-11',
+                    'payment_completed_at' => '2024-11-08',
+                    'release_channel' => 'Carteira do vendedor',
+                    'order_type' => 'Pedido normal',
+                    'hot_listing' => 'NO',
+                    'revenue_amount' => 0,
+                    'product_price' => 47.00,
+                    'row_raw' => ['source' => 'xlsx'],
+                ],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.inserted', 2)
+            ->assertJsonPath('stats.products_created', 1);
+
+        $this->getJson('/api/shopee/orders?year=2024&month=10')
+            ->assertOk()
+            ->assertJsonPath('summary.total_rows', 2)
+            ->assertJsonPath('summary.received_total', 31.72)
+            ->assertJsonPath('summary.unpaid_total', 0)
+            ->assertJsonPath('rows.0.linked_product.product_name', '100 Cartao de agradecimento ao cliente com bala Personalizada');
+
+        $this->assertDatabaseCount('pricing_products', 1);
+    }
+
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
     {
         $user = User::factory()->create([
