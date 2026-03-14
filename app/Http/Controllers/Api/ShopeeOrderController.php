@@ -23,8 +23,6 @@ final class ShopeeOrderController
 
         $year = max(0, (int) $request->query('year', 0));
         $month = max(0, min(12, (int) $request->query('month', 0)));
-        $limit = max(1, min(500, (int) $request->query('limit', 250)));
-
         $query = DB::table('shopee_order_reports')
             ->where('user_id', $user->id)
             ->whereNotNull('product_name')
@@ -47,7 +45,6 @@ final class ShopeeOrderController
         $rows = (clone $query)
             ->orderByDesc('order_created_at')
             ->orderByDesc('id')
-            ->limit($limit)
             ->get();
 
         $productMap = $this->loadProductMap($user->id, $rows);
@@ -356,6 +353,42 @@ final class ShopeeOrderController
         return response()->json([
             'message' => 'Produto Shopee atualizado com sucesso.',
             'product' => $updated ? $this->mapShopeeProduct($updated) : null,
+        ]);
+    }
+
+    public function destroyYear(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (!$this->isAdmin($user->role ?? null)) {
+            return response()->json(['message' => 'Acesso permitido apenas para admin.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'year' => ['required', 'integer', 'min:2000', 'max:2100'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Informe um ano valido para excluir os pedidos.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $year = (int) $request->input('year');
+
+        $deleted = DB::table('shopee_order_reports')
+            ->where('user_id', $user->id)
+            ->whereYear('order_created_at', $year)
+            ->delete();
+
+        return response()->json([
+            'message' => "Pedidos Shopee do ano {$year} excluidos com sucesso.",
+            'deleted' => $deleted,
+            'year' => $year,
         ]);
     }
 

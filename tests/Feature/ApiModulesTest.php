@@ -305,6 +305,59 @@ class ApiModulesTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_delete_all_shopee_orders_for_a_year(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('shopee_order_reports')->insert([
+            [
+                'user_id' => $user->id,
+                'import_key' => 'del-2024-1',
+                'sequence_number' => 1,
+                'order_id' => '2024A',
+                'product_name' => 'Produto 2024',
+                'order_created_at' => '2024-10-01',
+                'revenue_amount' => 10,
+                'product_price' => 20,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => $user->id,
+                'import_key' => 'del-2025-1',
+                'sequence_number' => 2,
+                'order_id' => '2025A',
+                'product_name' => 'Produto 2025',
+                'order_created_at' => '2025-01-10',
+                'revenue_amount' => 15,
+                'product_price' => 25,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $this->deleteJson('/api/shopee/orders/by-year', [
+            'year' => 2024,
+        ])
+            ->assertOk()
+            ->assertJsonPath('deleted', 1)
+            ->assertJsonPath('year', 2024);
+
+        $this->assertDatabaseMissing('shopee_order_reports', [
+            'user_id' => $user->id,
+            'import_key' => 'del-2024-1',
+        ]);
+        $this->assertDatabaseHas('shopee_order_reports', [
+            'user_id' => $user->id,
+            'import_key' => 'del-2025-1',
+        ]);
+    }
+
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
     {
         $user = User::factory()->create([
