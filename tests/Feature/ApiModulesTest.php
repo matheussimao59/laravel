@@ -358,6 +358,47 @@ class ApiModulesTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_bulk_delete_shopee_products(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $firstId = DB::table('shopee_products')->insertGetId([
+            'user_id' => $user->id,
+            'product_name' => 'Produto A',
+            'original_price' => 12,
+            'production_cost' => 3,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $secondId = DB::table('shopee_products')->insertGetId([
+            'user_id' => $user->id,
+            'product_name' => 'Produto B',
+            'original_price' => 20,
+            'production_cost' => 4,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->postJson('/api/shopee/products/bulk-delete', [
+            'ids' => [$firstId, $secondId],
+        ])
+            ->assertOk()
+            ->assertJsonPath('deleted', 2);
+
+        $this->assertDatabaseMissing('shopee_products', [
+            'id' => $firstId,
+        ]);
+        $this->assertDatabaseMissing('shopee_products', [
+            'id' => $secondId,
+        ]);
+    }
+
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
     {
         $user = User::factory()->create([
