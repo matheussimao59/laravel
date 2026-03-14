@@ -47,11 +47,12 @@ final class ShopeeOrderController
             ->get();
 
         $productMap = $this->loadProductMap($user->id, $rows);
+        $products = $this->loadAllProducts($user->id);
 
         $mappedRows = $rows
             ->map(function ($row) use ($productMap) {
                 $product = $productMap[$this->normalizeProductName((string) ($row->product_name ?? ''))] ?? null;
-                $cost = (float) ($product['base_cost'] ?? 0);
+                $cost = (float) ($product['production_cost'] ?? 0);
                 $revenue = (float) $row->revenue_amount;
 
                 return [
@@ -112,6 +113,7 @@ final class ShopeeOrderController
             ],
             'rows' => $mappedRows,
             'filters' => $filters,
+            'products' => array_values($products),
         ]);
     }
 
@@ -131,9 +133,9 @@ final class ShopeeOrderController
             return response()->json(['message' => 'Envie um array `rows` para importar.'], 422);
         }
 
-        $existingProducts = DB::table('pricing_products')
+        $existingProducts = DB::table('shopee_products')
             ->where('user_id', $user->id)
-            ->get(['id', 'product_name', 'selling_price']);
+            ->get(['id', 'product_name', 'original_price', 'production_cost', 'materials_json']);
 
         $productMap = [];
         foreach ($existingProducts as $product) {
@@ -237,13 +239,11 @@ final class ShopeeOrderController
             }
 
             if (!isset($productMap[$normalizedName])) {
-                $productId = DB::table('pricing_products')->insertGetId([
+                $productId = DB::table('shopee_products')->insertGetId([
                     'user_id' => $user->id,
                     'product_name' => $productName,
-                    'product_image_data' => null,
-                    'selling_price' => $productPrice,
-                    'base_cost' => 0,
-                    'final_margin' => 0,
+                    'original_price' => $productPrice,
+                    'production_cost' => 0,
                     'materials_json' => null,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -252,22 +252,24 @@ final class ShopeeOrderController
                 $productMap[$normalizedName] = (object) [
                     'id' => $productId,
                     'product_name' => $productName,
-                    'selling_price' => $productPrice,
+                    'original_price' => $productPrice,
+                    'production_cost' => 0,
+                    'materials_json' => null,
                 ];
                 $productsCreated++;
                 continue;
             }
 
             $existingProduct = $productMap[$normalizedName];
-            if ((float) ($existingProduct->selling_price ?? 0) <= 0 && $productPrice > 0) {
-                DB::table('pricing_products')
+            if ((float) ($existingProduct->original_price ?? 0) <= 0 && $productPrice > 0) {
+                DB::table('shopee_products')
                     ->where('id', $existingProduct->id)
                     ->update([
-                        'selling_price' => $productPrice,
+                        'original_price' => $productPrice,
                         'updated_at' => now(),
                     ]);
 
-                $existingProduct->selling_price = $productPrice;
+                $existingProduct->original_price = $productPrice;
                 $productMap[$normalizedName] = $existingProduct;
                 $productsUpdated++;
             }
@@ -285,35 +287,96 @@ final class ShopeeOrderController
         ]);
     }
 
+    public function updateProduct(Request $request, string $product): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (!$this->isAdmin($user->role ?? null)) {
+            return response()->json(['message' => 'Acesso permitido apenas para admin.'], 403);
+        }
+
+        $row = DB::table('shopee_products')
+            ->where('id', (int) $product)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$row) {
+            return response()->json(['message' => 'Produto Shopee nao encontrado.'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'original_price' => ['sometimes', 'numeric', 'min:0'],
+            'production_cost' => ['sometimes', 'numeric', 'min:0'],
+            'materials_json' => ['sometimes', 'nullable'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Dados invalidos para produto Shopee.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        DB::table('shopee_products')
+            ->where('id', (int) $product)
+            ->update([
+                'original_price' => $request->has('original_price') ? round((float) $request->input('original_price'), 2) : (float) $row->original_price,
+                'production_cost' => $request->has('production_cost') ? round((float) $request->input('production_cost'), 2) : (float) $row->production_cost,
+                'materials_json' => $request->has('materials_json')
+                    ? json_encode($request->input('materials_json'))
+                    : $row->materials_json,
+                'updated_at' => now(),
+            ]);
+
+        $updated = DB::table('shopee_products')->where('id', (int) $product)->first();
+
+        return response()->json([
+            'message' => 'Produto Shopee atualizado com sucesso.',
+            'product' => $updated ? $this->mapShopeeProduct($updated) : null,
+        ]);
+    }
+
     private function loadProductMap(int $userId, Collection $rows): array
     {
-        $names = $rows
-            ->map(fn ($row) => trim((string) ($row->product_name ?? '')))
-            ->filter()
-            ->values()
-            ->all();
-
-        if ($names === []) {
+        if ($rows->isEmpty()) {
             return [];
         }
 
-        $products = DB::table('pricing_products')
+        return DB::table('shopee_products')
             ->where('user_id', $userId)
             ->get()
             ->mapWithKeys(function ($row) {
                 $normalized = $this->normalizeProductName((string) $row->product_name);
-                return [$normalized => [
-                    'id' => (string) $row->id,
-                    'product_name' => $row->product_name,
-                    'selling_price' => (float) $row->selling_price,
-                    'base_cost' => (float) $row->base_cost,
-                    'final_margin' => (float) $row->final_margin,
-                    'materials_json' => $this->decodeJson($row->materials_json),
-                ]];
+                return [$normalized => $this->mapShopeeProduct($row)];
             })
             ->all();
+    }
 
-        return $products;
+    private function loadAllProducts(int $userId): array
+    {
+        return DB::table('shopee_products')
+            ->where('user_id', $userId)
+            ->orderBy('product_name')
+            ->get()
+            ->map(fn ($row) => $this->mapShopeeProduct($row))
+            ->values()
+            ->all();
+    }
+
+    private function mapShopeeProduct(object $row): array
+    {
+        return [
+            'id' => (string) $row->id,
+            'product_name' => $row->product_name,
+            'original_price' => (float) $row->original_price,
+            'production_cost' => (float) ($row->production_cost ?? 0),
+            'materials_json' => $this->decodeJson($row->materials_json),
+            'created_at' => $row->created_at ?? null,
+            'updated_at' => $row->updated_at ?? null,
+        ];
     }
 
     private function normalizeProductName(string $value): string

@@ -48,6 +48,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/shopee/orders', [ShopeeOrderController::class, 'index']);
     Route::post('/shopee/orders/import', [ShopeeOrderController::class, 'import']);
+    Route::patch('/shopee/products/{product}', [ShopeeOrderController::class, 'updateProduct']);
 
     Route::apiResource('cover-agenda', CoverAgendaController::class);
     Route::patch('/cover-agenda/{cover}/printed', [CoverAgendaController::class, 'markPrinted']);

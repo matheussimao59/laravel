@@ -245,9 +245,10 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('summary.total_rows', 2)
             ->assertJsonPath('summary.received_total', 31.72)
             ->assertJsonPath('summary.unpaid_total', 0)
-            ->assertJsonPath('rows.0.linked_product.product_name', '100 Cartao de agradecimento ao cliente com bala Personalizada');
+            ->assertJsonPath('rows.0.linked_product.product_name', '100 Cartao de agradecimento ao cliente com bala Personalizada')
+            ->assertJsonPath('products.0.product_name', '100 Cartao de agradecimento ao cliente com bala Personalizada');
 
-        $this->assertDatabaseCount('pricing_products', 1);
+        $this->assertDatabaseCount('shopee_products', 1);
     }
 
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
