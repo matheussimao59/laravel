@@ -48,6 +48,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/shopee/orders', [ShopeeOrderController::class, 'index']);
     Route::post('/shopee/orders/import', [ShopeeOrderController::class, 'import']);
+    Route::post('/shopee/orders/bulk-delete', [ShopeeOrderController::class, 'destroyOrders']);
     Route::delete('/shopee/orders/by-year', [ShopeeOrderController::class, 'destroyYear']);
     Route::patch('/shopee/products/{product}', [ShopeeOrderController::class, 'updateProduct']);
     Route::post('/shopee/products/bulk-delete', [ShopeeOrderController::class, 'destroyProducts']);

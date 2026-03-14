@@ -115,6 +115,68 @@ final class ShopeeOrderController
             ->sortByDesc(fn (array $item) => sprintf('%04d-%02d', $item['year'], $item['month']))
             ->values();
 
+        $availableYears = $filters
+            ->pluck('year')
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $requestedChartYears = collect(explode(',', (string) $request->query('chart_years', '')))
+            ->map(fn ($value) => (int) trim($value))
+            ->filter(fn (int $value) => $value > 0)
+            ->values()
+            ->all();
+
+        $chartYears = $requestedChartYears !== [] ? $requestedChartYears : $availableYears;
+        $chartRows = DB::table('shopee_order_reports')
+            ->where('user_id', $user->id)
+            ->whereNotNull('product_name')
+            ->whereRaw("trim(product_name) <> ''")
+            ->whereRaw("trim(product_name) <> '-'")
+            ->where('revenue_amount', '>', 0)
+            ->whereNotNull('order_created_at')
+            ->when($chartYears !== [], function ($builder) use ($chartYears) {
+                $builder->where(function ($inner) use ($chartYears) {
+                    foreach ($chartYears as $chartYear) {
+                        $inner->orWhere('order_created_at', 'like', sprintf('%04d-%%', $chartYear));
+                    }
+                });
+            })
+            ->orderBy('order_created_at')
+            ->get(['order_created_at', 'revenue_amount']);
+
+        $chartSeries = collect($chartYears)
+            ->map(function (int $chartYear) use ($chartRows) {
+                $monthlyTotals = array_fill(1, 12, 0.0);
+
+                foreach ($chartRows as $row) {
+                    $date = (string) ($row->order_created_at ?? '');
+                    if (!preg_match('/^(\d{4})-(\d{2})-\d{2}$/', $date, $matches)) {
+                        continue;
+                    }
+
+                    if ((int) $matches[1] !== $chartYear) {
+                        continue;
+                    }
+
+                    $monthNumber = (int) $matches[2];
+                    $monthlyTotals[$monthNumber] += (float) $row->revenue_amount;
+                }
+
+                $values = array_map(
+                    fn (float $value) => round($value, 2),
+                    array_values($monthlyTotals)
+                );
+
+                return [
+                    'year' => $chartYear,
+                    'values' => $values,
+                    'total' => round(array_sum($values), 2),
+                ];
+            })
+            ->values();
+
         return response()->json([
             'summary' => [
                 'total_rows' => (int) ($summary->total_rows ?? 0),
@@ -126,6 +188,10 @@ final class ShopeeOrderController
             'rows' => $mappedRows,
             'filters' => $filters,
             'products' => array_values($products),
+            'chart' => [
+                'available_years' => $availableYears,
+                'series' => $chartSeries,
+            ],
         ]);
     }
 
@@ -159,6 +225,7 @@ final class ShopeeOrderController
         $unchanged = 0;
         $productsCreated = 0;
         $productsUpdated = 0;
+        $skippedNonPositive = 0;
 
         foreach ($rows as $row) {
             if (!is_array($row)) {
@@ -167,6 +234,12 @@ final class ShopeeOrderController
 
             $productName = trim((string) ($row['product_name'] ?? ''));
             if ($productName === '' || $productName === '-') {
+                continue;
+            }
+
+            $revenueAmount = round((float) ($row['revenue_amount'] ?? 0), 2);
+            if ($revenueAmount <= 0) {
+                $skippedNonPositive++;
                 continue;
             }
 
@@ -207,7 +280,7 @@ final class ShopeeOrderController
                 'release_channel' => $row['release_channel'] ?? null,
                 'order_type' => $row['order_type'] ?? null,
                 'hot_listing' => $row['hot_listing'] ?? null,
-                'revenue_amount' => round((float) ($row['revenue_amount'] ?? 0), 2),
+                'revenue_amount' => $revenueAmount,
                 'product_price' => round((float) ($row['product_price'] ?? 0), 2),
                 'source_file_name' => $row['source_file_name'] ?? null,
                 'row_raw' => isset($row['row_raw']) ? json_encode($row['row_raw']) : null,
@@ -298,6 +371,7 @@ final class ShopeeOrderController
                 'inserted' => $inserted,
                 'updated' => $updated,
                 'unchanged' => $unchanged,
+                'skipped_non_positive' => $skippedNonPositive,
                 'products_created' => $productsCreated,
                 'products_updated' => $productsUpdated,
             ],
@@ -389,6 +463,50 @@ final class ShopeeOrderController
             'message' => "Pedidos Shopee do ano {$year} excluidos com sucesso.",
             'deleted' => $deleted,
             'year' => $year,
+        ]);
+    }
+
+    public function destroyOrders(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (!$this->isAdmin($user->role ?? null)) {
+            return response()->json(['message' => 'Acesso permitido apenas para admin.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['required'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Selecione ao menos um pedido para excluir.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $ids = collect($request->input('ids', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return response()->json(['message' => 'Selecione pedidos validos para excluir.'], 422);
+        }
+
+        $deleted = DB::table('shopee_order_reports')
+            ->where('user_id', $user->id)
+            ->whereIn('id', $ids)
+            ->delete();
+
+        return response()->json([
+            'message' => "{$deleted} pedido(s) Shopee excluido(s) com sucesso.",
+            'deleted' => $deleted,
         ]);
     }
 

@@ -252,12 +252,13 @@ class ApiModulesTest extends TestCase
             ],
         ])
             ->assertOk()
-            ->assertJsonPath('stats.inserted', 2)
+            ->assertJsonPath('stats.inserted', 1)
+            ->assertJsonPath('stats.skipped_non_positive', 1)
             ->assertJsonPath('stats.products_created', 1);
 
         $this->getJson('/api/shopee/orders?year=2024&month=10')
             ->assertOk()
-            ->assertJsonPath('summary.total_rows', 2)
+            ->assertJsonPath('summary.total_rows', 1)
             ->assertJsonPath('summary.received_total', 31.72)
             ->assertJsonPath('summary.unpaid_total', 0)
             ->assertJsonPath('rows.0.linked_product.product_name', '100 Cartao de agradecimento ao cliente com bala Personalizada')
@@ -295,13 +296,13 @@ class ApiModulesTest extends TestCase
             ],
         ])
             ->assertOk()
-            ->assertJsonPath('stats.inserted', 1)
-            ->assertJsonPath('stats.products_created', 1);
+            ->assertJsonPath('stats.inserted', 0)
+            ->assertJsonPath('stats.skipped_non_positive', 1)
+            ->assertJsonPath('stats.products_created', 0);
 
-        $this->assertDatabaseHas('shopee_products', [
+        $this->assertDatabaseMissing('shopee_products', [
             'user_id' => $user->id,
             'product_name' => '100 Balas Personalizadas Outubro Rosa Mimo Para Cliente, Festa, Lembrancinha Personalizada',
-            'original_price' => 0,
         ]);
     }
 
@@ -397,6 +398,114 @@ class ApiModulesTest extends TestCase
         $this->assertDatabaseMissing('shopee_products', [
             'id' => $secondId,
         ]);
+    }
+
+    public function test_admin_can_bulk_delete_shopee_orders(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $firstId = DB::table('shopee_order_reports')->insertGetId([
+            'user_id' => $user->id,
+            'import_key' => 'bulk-order-1',
+            'sequence_number' => 1,
+            'order_id' => 'ORDER-1',
+            'product_name' => 'Produto A',
+            'order_created_at' => '2024-10-01',
+            'revenue_amount' => 20,
+            'product_price' => 30,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $secondId = DB::table('shopee_order_reports')->insertGetId([
+            'user_id' => $user->id,
+            'import_key' => 'bulk-order-2',
+            'sequence_number' => 2,
+            'order_id' => 'ORDER-2',
+            'product_name' => 'Produto B',
+            'order_created_at' => '2024-10-02',
+            'revenue_amount' => 15,
+            'product_price' => 25,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->postJson('/api/shopee/orders/bulk-delete', [
+            'ids' => [$firstId, $secondId],
+        ])
+            ->assertOk()
+            ->assertJsonPath('deleted', 2);
+
+        $this->assertDatabaseMissing('shopee_order_reports', [
+            'id' => $firstId,
+        ]);
+        $this->assertDatabaseMissing('shopee_order_reports', [
+            'id' => $secondId,
+        ]);
+    }
+
+    public function test_shopee_chart_can_compare_multiple_years(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('shopee_order_reports')->insert([
+            [
+                'user_id' => $user->id,
+                'import_key' => 'chart-2024-jan',
+                'sequence_number' => 1,
+                'order_id' => 'CH-1',
+                'product_name' => 'Produto A',
+                'order_created_at' => '2024-01-10',
+                'revenue_amount' => 100,
+                'product_price' => 120,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => $user->id,
+                'import_key' => 'chart-2024-feb',
+                'sequence_number' => 2,
+                'order_id' => 'CH-2',
+                'product_name' => 'Produto A',
+                'order_created_at' => '2024-02-10',
+                'revenue_amount' => 200,
+                'product_price' => 220,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => $user->id,
+                'import_key' => 'chart-2025-jan',
+                'sequence_number' => 3,
+                'order_id' => 'CH-3',
+                'product_name' => 'Produto B',
+                'order_created_at' => '2025-01-10',
+                'revenue_amount' => 150,
+                'product_price' => 180,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $this->getJson('/api/shopee/orders?chart_years=2024,2025')
+            ->assertOk()
+            ->assertJsonPath('chart.available_years.0', 2024)
+            ->assertJsonPath('chart.available_years.1', 2025)
+            ->assertJsonPath('chart.series.0.year', 2024)
+            ->assertJsonPath('chart.series.0.values.0', 100)
+            ->assertJsonPath('chart.series.0.values.1', 200)
+            ->assertJsonPath('chart.series.1.year', 2025)
+            ->assertJsonPath('chart.series.1.values.0', 150);
     }
 
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
