@@ -584,17 +584,53 @@ final class MercadoLivreService
         ]) ?: (string) ($order['date_created'] ?? '');
     }
 
-    private function firstValidDate(array $candidates): string
+    public function fetchCompetitorPrices(string $itemId, string $accessToken): array
     {
-        foreach ($candidates as $candidate) {
-            if (!is_string($candidate) || trim($candidate) === '') {
-                continue;
-            }
-            if (strtotime($candidate) !== false) {
-                return trim($candidate);
+        // Buscar item similar ou concorrentes via API do ML
+        // Exemplo: buscar itens similares
+        $similar = $this->safeRequest("/items/{$itemId}/similar", $accessToken);
+        $competitors = [];
+
+        if (is_array($similar)) {
+            foreach ($similar as $item) {
+                if (is_array($item) && isset($item['id'], $item['price'])) {
+                    $competitors[] = [
+                        'id' => $item['id'],
+                        'price' => (float) $item['price'],
+                        'title' => $item['title'] ?? '',
+                    ];
+                }
             }
         }
 
-        return '';
+        return $competitors;
     }
-}
+
+    public function updateItemPrice(string $itemId, float $newPrice, string $accessToken): bool
+    {
+        try {
+            $this->request("/items/{$itemId}", $accessToken, 'PUT', [
+                'price' => $newPrice,
+            ]);
+            return true;
+        } catch (ExternalServiceException) {
+            return false;
+        }
+    }
+
+    public function calculateReprice(\App\Models\MercadoLivreProduct $product, array $competitors): ?float
+    {
+        if (empty($competitors)) return null;
+
+        // Estratégia simples: preço médio dos concorrentes - 1%
+        $prices = array_column($competitors, 'price');
+        $avgPrice = array_sum($prices) / count($prices);
+        $suggestedPrice = $avgPrice * 0.99;
+
+        // Verificar margem mínima
+        if (!$product->isMarginValid($suggestedPrice)) {
+            return null; // Não ajustar se margem insuficiente
+        }
+
+        return round($suggestedPrice, 2);
+    }
