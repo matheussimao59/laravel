@@ -1,97 +1,123 @@
 @extends('layouts.app')
 
+@section('title', 'Mercado Livre')
+
 @section('content')
 <div class="container">
-    <h1>Dashboard Mercado Livre - Repricing</h1>
+    <div class="page-head">
+        <h1>Dashboard Mercado Livre</h1>
+        <p>Modulo atual de repricing e gestao de produtos do Mercado Livre.</p>
+    </div>
 
-    <div class="row">
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body">
-                    <h5>Total de Produtos</h5>
-                    <h2>{{ $totalProducts }}</h2>
-                </div>
+    <div class="grid">
+        <div class="card">
+            <div class="card-body">
+                <p class="metric-label">Total de produtos</p>
+                <h2 class="metric-value">{{ $totalProducts }}</h2>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body">
-                    <h5>Com Repricing Automático</h5>
-                    <h2>{{ $autoRepriceCount }}</h2>
-                </div>
+        <div class="card">
+            <div class="card-body">
+                <p class="metric-label">Com repricing automatico</p>
+                <h2 class="metric-value">{{ $autoRepriceCount }}</h2>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body">
-                    <h5>Mudanças Recentes</h5>
-                    <h2>{{ $recentChanges->count() }}</h2>
-                </div>
+        <div class="card">
+            <div class="card-body">
+                <p class="metric-label">Mudancas recentes</p>
+                <h2 class="metric-value">{{ $recentChanges->count() }}</h2>
             </div>
         </div>
     </div>
 
-    <h3>Produtos</h3>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Título</th>
-                <th>Preço Atual</th>
-                <th>Margem</th>
-                <th>Auto Reprice</th>
-                <th>Ações</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach($products as $product)
-            <tr>
-                <td>{{ $product->title }}</td>
-                <td>R$ {{ number_format($product->current_price, 2, ',', '.') }}</td>
-                <td>{{ number_format($product->calculateMargin(), 2) }}%</td>
-                <td>{{ $product->auto_reprice ? 'Sim' : 'Não' }}</td>
-                <td>
-                    <form action="{{ route('mercado-livre.update-price', $product->id) }}" method="POST" class="d-inline">
-                        @csrf @method('PATCH')
-                        <input type="number" step="0.01" name="new_price" value="{{ $product->current_price }}" required>
-                        <button type="submit" class="btn btn-sm btn-primary">Atualizar</button>
-                    </form>
-                </td>
-            </tr>
-            @endforeach
-        </tbody>
-    </table>
+    <section class="card">
+        <div class="card-content">
+            <h3 class="panel-title">Produtos</h3>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Titulo</th>
+                            <th>Preco atual</th>
+                            <th>Margem</th>
+                            <th>Auto reprice</th>
+                            <th>Acoes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse($products as $product)
+                            <tr>
+                                <td>{{ $product->title }}</td>
+                                <td>R$ {{ number_format($product->current_price, 2, ',', '.') }}</td>
+                                <td>{{ number_format($product->calculateMargin(), 2) }}%</td>
+                                <td>{{ $product->auto_reprice ? 'Sim' : 'Nao' }}</td>
+                                <td>
+                                    <form action="{{ route('mercado-livre.update-price', $product->id) }}" method="POST" class="inline-form">
+                                        @csrf
+                                        @method('PATCH')
+                                        <input type="number" step="0.01" name="new_price" value="{{ $product->current_price }}" class="form-control" required>
+                                        <button type="submit" class="btn btn-primary">Atualizar</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="5">Nenhum produto cadastrado ainda.</td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
 
-    <h3>Adicionar Produto</h3>
-    <form action="{{ route('mercado-livre.store') }}" method="POST">
-        @csrf
-        <div class="mb-3">
-            <label>Item ID</label>
-            <input type="text" name="item_id" class="form-control" required>
-        </div>
-        <div class="mb-3">
-            <label>Título</label>
-            <input type="text" name="title" class="form-control" required>
-        </div>
-        <div class="mb-3">
-            <label>Preço Atual</label>
-            <input type="number" step="0.01" name="current_price" class="form-control" required>
-        </div>
-        <div class="mb-3">
-            <label>Custo</label>
-            <input type="number" step="0.01" name="cost_price" class="form-control">
-        </div>
-        <div class="mb-3">
-            <label>Margem Mínima (%)</label>
-            <input type="number" step="0.01" name="min_margin" value="10" class="form-control">
-        </div>
-        <button type="submit" class="btn btn-success">Adicionar</button>
-    </form>
+    <div class="grid">
+        <section class="card">
+            <div class="card-content">
+                <h3 class="panel-title">Adicionar produto</h3>
+                <form action="{{ route('mercado-livre.store') }}" method="POST" class="stack">
+                    @csrf
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="item_id">Item ID</label>
+                            <input id="item_id" type="text" name="item_id" class="form-control" required>
+                        </div>
+                        <div class="field">
+                            <label for="title">Titulo</label>
+                            <input id="title" type="text" name="title" class="form-control" required>
+                        </div>
+                        <div class="field">
+                            <label for="current_price">Preco atual</label>
+                            <input id="current_price" type="number" step="0.01" name="current_price" class="form-control" required>
+                        </div>
+                        <div class="field">
+                            <label for="cost_price">Custo</label>
+                            <input id="cost_price" type="number" step="0.01" name="cost_price" class="form-control">
+                        </div>
+                        <div class="field">
+                            <label for="min_margin">Margem minima (%)</label>
+                            <input id="min_margin" type="number" step="0.01" name="min_margin" value="10" class="form-control">
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button type="submit" class="btn btn-success">Adicionar</button>
+                    </div>
+                </form>
+            </div>
+        </section>
 
-    <h3>Mudanças Recentes</h3>
-    <ul>
-        @foreach($recentChanges as $change)
-        <li>{{ $change->mercadoLivreProduct->title }}: R$ {{ $change->old_price }} → R$ {{ $change->new_price }} ({{ $change->reason }})</li>
-        @endforeach
-    </ul>
+        <section class="card">
+            <div class="card-content">
+                <h3 class="panel-title">Mudancas recentes</h3>
+                <ul class="list">
+                    @forelse($recentChanges as $change)
+                        <li>{{ $change->mercadoLivreProduct->title }}: R$ {{ $change->old_price }} -> R$ {{ $change->new_price }} ({{ $change->reason }})</li>
+                    @empty
+                        <li>Nenhuma mudanca recente registrada.</li>
+                    @endforelse
+                </ul>
+            </div>
+        </section>
+    </div>
 </div>
 @endsection

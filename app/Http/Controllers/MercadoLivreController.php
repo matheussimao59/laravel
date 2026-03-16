@@ -25,6 +25,11 @@ class MercadoLivreController extends Controller
         return view('mercado-livre.dashboard', compact('products', 'totalProducts', 'autoRepriceCount', 'recentChanges'));
     }
 
+    public function betaDashboard()
+    {
+        return view('mercado-livre.beta-dashboard');
+    }
+
     public function storeProduct(Request $request, MercadoLivreService $mlService)
     {
         $request->validate([
