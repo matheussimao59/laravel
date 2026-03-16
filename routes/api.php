@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\FiscalSettingController;
 use App\Http\Controllers\Api\FinancialController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\MercadoLivreController;
+use App\Http\Controllers\Api\MercadoLivreConfigController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
 use App\Http\Controllers\Api\ShippingOrderController;
@@ -68,6 +69,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/fiscal/documents/{document}', [FiscalDocumentController::class, 'destroy']);
 
     Route::prefix('integrations/mercado-livre')->group(function () {
+        Route::get('/config', [MercadoLivreConfigController::class, 'show']);
+        Route::put('/config', [MercadoLivreConfigController::class, 'update']);
         Route::post('/oauth/token', [MercadoLivreController::class, 'oauthToken']);
         Route::post('/sync', [MercadoLivreController::class, 'sync']);
         Route::post('/customization', [MercadoLivreController::class, 'sendCustomization']);

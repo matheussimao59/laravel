@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Crypt;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -89,6 +90,104 @@ class ApiModulesTest extends TestCase
         $this->getJson('/api/settings/global_bala_mockup_config')
             ->assertOk()
             ->assertJsonPath('setting.config_data.template_data', 'data:image/png;base64,ZmFrZQ==');
+    }
+
+    public function test_admin_can_save_and_read_mercado_livre_config_without_exposing_secret(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->putJson('/api/integrations/mercado-livre/config', [
+            'client_id' => 'ml-client-id',
+            'client_secret' => 'ml-client-secret',
+            'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
+        ])
+            ->assertOk()
+            ->assertJsonPath('config.client_id', 'ml-client-id')
+            ->assertJsonPath('config.redirect_uri', 'https://unicaprint.com.br/mercado-livre-beta')
+            ->assertJsonPath('config.has_client_secret', true)
+            ->assertJsonMissing(['client_secret' => 'ml-client-secret']);
+
+        $stored = DB::table('app_settings')
+            ->where('id', 'global_ml_oauth_config')
+            ->whereNull('user_id')
+            ->first();
+
+        $config = json_decode((string) ($stored?->config_data ?? '{}'), true);
+
+        $this->assertIsArray($config);
+        $this->assertNotSame('ml-client-secret', $config['client_secret'] ?? null);
+        $this->assertSame('ml-client-secret', Crypt::decryptString((string) $config['client_secret']));
+
+        $this->getJson('/api/integrations/mercado-livre/config')
+            ->assertOk()
+            ->assertJsonPath('config.client_id', 'ml-client-id')
+            ->assertJsonPath('config.configured', true)
+            ->assertJsonPath('config.has_client_secret', true)
+            ->assertJsonMissing(['client_secret' => 'ml-client-secret']);
+    }
+
+    public function test_non_admin_cannot_update_mercado_livre_config(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'user',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->putJson('/api/integrations/mercado-livre/config', [
+            'client_id' => 'ml-client-id',
+            'client_secret' => 'ml-client-secret',
+            'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
+        ])->assertStatus(403);
+    }
+
+    public function test_oauth_token_exchange_uses_mercado_livre_config_saved_in_panel(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        DB::table('app_settings')->insert([
+            'id' => 'global_ml_oauth_config',
+            'user_id' => null,
+            'config_data' => json_encode([
+                'client_id' => 'panel-client-id',
+                'client_secret' => Crypt::encryptString('panel-client-secret'),
+                'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
+            ]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.mercadolibre.com/oauth/token' => Http::response([
+                'access_token' => 'ml-access-token',
+                'token_type' => 'bearer',
+            ]),
+        ]);
+
+        $this->postJson('/api/integrations/mercado-livre/oauth/token', [
+            'code' => 'oauth-code',
+            'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
+        ])
+            ->assertOk()
+            ->assertJsonPath('access_token', 'ml-access-token');
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://api.mercadolibre.com/oauth/token'
+                && $request['client_id'] === 'panel-client-id'
+                && $request['client_secret'] === 'panel-client-secret'
+                && $request['code'] === 'oauth-code';
+        });
     }
 
     public function test_authenticated_user_can_create_and_list_pricing_materials(): void

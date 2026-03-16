@@ -4,18 +4,19 @@ namespace App\Services;
 
 use App\Support\ExternalServiceException;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 final class MercadoLivreService
 {
     public function exchangeToken(string $code, string $redirectUri, ?string $codeVerifier = null): array
     {
-        $clientId = trim((string) config('services.mercado_livre.client_id'));
-        $clientSecret = trim((string) config('services.mercado_livre.client_secret'));
+        ['client_id' => $clientId, 'client_secret' => $clientSecret] = $this->oauthCredentials();
 
         if ($clientId === '' || $clientSecret === '') {
             throw new ExternalServiceException(
-                'Defina ML_CLIENT_ID e ML_CLIENT_SECRET no ambiente da API Laravel.',
+                'Configure Client ID e Client Secret do Mercado Livre no painel ou no ambiente da API Laravel.',
                 500
             );
         }
@@ -218,6 +219,43 @@ final class MercadoLivreService
     private function baseUrl(): string
     {
         return rtrim((string) config('services.mercado_livre.base_url', 'https://api.mercadolibre.com'), '/');
+    }
+
+    private function oauthCredentials(): array
+    {
+        $stored = DB::table('app_settings')
+            ->where('id', 'global_ml_oauth_config')
+            ->whereNull('user_id')
+            ->first();
+
+        if ($stored) {
+            $config = json_decode((string) ($stored->config_data ?? '{}'), true);
+            if (is_array($config)) {
+                $clientId = trim((string) ($config['client_id'] ?? ''));
+                $encryptedSecret = trim((string) ($config['client_secret'] ?? ''));
+                $clientSecret = '';
+
+                if ($encryptedSecret !== '') {
+                    try {
+                        $clientSecret = trim(Crypt::decryptString($encryptedSecret));
+                    } catch (\Throwable) {
+                        $clientSecret = '';
+                    }
+                }
+
+                if ($clientId !== '' && $clientSecret !== '') {
+                    return [
+                        'client_id' => $clientId,
+                        'client_secret' => $clientSecret,
+                    ];
+                }
+            }
+        }
+
+        return [
+            'client_id' => trim((string) config('services.mercado_livre.client_id')),
+            'client_secret' => trim((string) config('services.mercado_livre.client_secret')),
+        ];
     }
 
     private function request(
@@ -634,3 +672,4 @@ final class MercadoLivreService
 
         return round($suggestedPrice, 2);
     }
+}
