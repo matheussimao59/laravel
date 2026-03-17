@@ -20,15 +20,30 @@ final class CoverAgendaController
         }
 
         $includeImages = $request->boolean('include_images', true);
-        $query = DB::table('cover_agenda_items')->where('user_id', $user->id)->orderByDesc('updated_at');
+        $limit = max(1, min(500, (int) $request->input('limit', 120)));
+        $offset = max(0, (int) $request->input('offset', 0));
+
+        $query = DB::table('cover_agenda_items')->where('user_id', $user->id);
         if ($request->has('printed')) {
             $query->where('printed', $request->boolean('printed'));
         }
 
+        $total = (clone $query)->count();
+        $rows = $query
+            ->orderByDesc('updated_at')
+            ->offset($offset)
+            ->limit($limit)
+            ->get();
+
         return response()->json([
-            'items' => $query->limit((int) $request->input('limit', 120))->get()->map(
+            'items' => $rows->map(
                 fn ($row) => $this->mapRow($row, $includeImages)
             )->values(),
+            'meta' => [
+                'total' => $total,
+                'limit' => $limit,
+                'offset' => $offset,
+            ],
         ]);
     }
 

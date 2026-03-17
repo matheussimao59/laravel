@@ -289,7 +289,10 @@ class ApiModulesTest extends TestCase
         $this->getJson('/api/cover-agenda?limit=10')
             ->assertOk()
             ->assertJsonCount(1, 'items')
-            ->assertJsonPath('items.0.order_id', '66');
+            ->assertJsonPath('items.0.order_id', '66')
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('meta.limit', 10)
+            ->assertJsonPath('meta.offset', 0);
 
         $this->getJson('/api/cover-agenda?limit=10&include_images=0')
             ->assertOk()
@@ -297,6 +300,43 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('items.0.back_image', null)
             ->assertJsonPath('items.0.has_front_image', true)
             ->assertJsonPath('items.0.has_back_image', true);
+    }
+
+    public function test_cover_agenda_index_supports_offset_pagination(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        foreach (['100', '101', '102'] as $index => $orderId) {
+            DB::table('cover_agenda_items')->insert([
+                'user_id' => $user->id,
+                'order_id' => $orderId,
+                'front_image' => 'data:image/png;base64,' . base64_encode("front-{$index}"),
+                'back_image' => 'data:image/png;base64,' . base64_encode("back-{$index}"),
+                'printed' => false,
+                'printed_at' => null,
+                'created_at' => now()->subMinutes(3 - $index),
+                'updated_at' => now()->subMinutes(3 - $index),
+            ]);
+        }
+
+        $this->getJson('/api/cover-agenda?limit=2&offset=0&include_images=0')
+            ->assertOk()
+            ->assertJsonCount(2, 'items')
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('meta.limit', 2)
+            ->assertJsonPath('meta.offset', 0);
+
+        $this->getJson('/api/cover-agenda?limit=2&offset=2&include_images=0')
+            ->assertOk()
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('meta.limit', 2)
+            ->assertJsonPath('meta.offset', 2);
     }
 
     public function test_authenticated_user_can_mark_cover_agenda_item_as_printed(): void
