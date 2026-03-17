@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -126,7 +127,9 @@ final class CoverAgendaController
         $payload = [
             'order_id' => $request->has('order_id') ? trim((string) $request->input('order_id')) : $row->order_id,
             'printed' => $request->has('printed') ? $request->boolean('printed') : (bool) $row->printed,
-            'printed_at' => $request->exists('printed_at') ? $request->input('printed_at') : $row->printed_at,
+            'printed_at' => $request->exists('printed_at')
+                ? $this->normalizePrintedAt($request->input('printed_at'))
+                : $row->printed_at,
             'updated_at' => now(),
         ];
         $payload[$columns['front']] = $request->has('front_image')
@@ -167,7 +170,7 @@ final class CoverAgendaController
 
         $printed = $request->boolean('printed', true);
         $printedAt = $request->exists('printed_at')
-            ? $request->input('printed_at')
+            ? $this->normalizePrintedAt($request->input('printed_at'))
             : ($printed ? now()->toDateTimeString() : null);
 
         DB::table('cover_agenda_items')->where('id', (int) $cover)->update([
@@ -272,5 +275,23 @@ final class CoverAgendaController
         File::put($absoluteDir . DIRECTORY_SEPARATOR . $filename, $binary);
 
         return rtrim(config('app.url'), '/') . '/' . trim($relativeDir . '/' . $filename, '/');
+    }
+
+    private function normalizePrintedAt(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($raw)->format('Y-m-d H:i:s');
+        } catch (\Throwable) {
+            return $raw;
+        }
     }
 }

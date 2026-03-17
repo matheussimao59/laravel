@@ -366,12 +366,12 @@ class ApiModulesTest extends TestCase
             ->assertOk()
             ->assertJsonPath('item.id', (string) $coverId)
             ->assertJsonPath('item.printed', true)
-            ->assertJsonPath('item.printed_at', '2026-03-17T10:00:00Z');
+            ->assertJsonPath('item.printed_at', '2026-03-17 10:00:00');
 
         $this->assertDatabaseHas('cover_agenda_items', [
             'id' => $coverId,
             'printed' => true,
-            'printed_at' => '2026-03-17T10:00:00Z',
+            'printed_at' => '2026-03-17 10:00:00',
         ]);
     }
 
