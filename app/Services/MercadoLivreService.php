@@ -223,6 +223,15 @@ final class MercadoLivreService
 
     private function oauthCredentials(): array
     {
+        $envCredentials = [
+            'client_id' => trim((string) config('services.mercado_livre.client_id')),
+            'client_secret' => trim((string) config('services.mercado_livre.client_secret')),
+        ];
+
+        if ($envCredentials['client_id'] !== '' && $envCredentials['client_secret'] !== '') {
+            return $envCredentials;
+        }
+
         $stored = DB::table('app_settings')
             ->where('id', 'global_ml_oauth_config')
             ->whereNull('user_id')
@@ -252,10 +261,7 @@ final class MercadoLivreService
             }
         }
 
-        return [
-            'client_id' => trim((string) config('services.mercado_livre.client_id')),
-            'client_secret' => trim((string) config('services.mercado_livre.client_secret')),
-        ];
+        return $envCredentials;
     }
 
     private function request(
@@ -272,6 +278,7 @@ final class MercadoLivreService
 
         $response = match (strtoupper($method)) {
             'POST' => $client->post($this->baseUrl() . $path, $payload ?? []),
+            'PUT' => $client->put($this->baseUrl() . $path, $payload ?? []),
             default => $client->get($this->baseUrl() . $path),
         };
 
@@ -620,6 +627,18 @@ final class MercadoLivreService
             $shipping['date_last_updated'] ?? null,
             $order['date_created'] ?? null,
         ]) ?: (string) ($order['date_created'] ?? '');
+    }
+
+    private function firstValidDate(array $candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            $value = trim((string) $candidate);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     public function fetchCompetitorPrices(string $itemId, string $accessToken): array

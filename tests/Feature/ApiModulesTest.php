@@ -147,7 +147,7 @@ class ApiModulesTest extends TestCase
         ])->assertStatus(403);
     }
 
-    public function test_oauth_token_exchange_uses_mercado_livre_config_saved_in_panel(): void
+    public function test_oauth_token_exchange_falls_back_to_saved_panel_config_when_env_is_empty(): void
     {
         $admin = User::factory()->create([
             'role' => 'admin',
@@ -168,6 +168,9 @@ class ApiModulesTest extends TestCase
             'updated_at' => now(),
         ]);
 
+        config()->set('services.mercado_livre.client_id', '');
+        config()->set('services.mercado_livre.client_secret', '');
+
         Http::fake([
             'https://api.mercadolibre.com/oauth/token' => Http::response([
                 'access_token' => 'ml-access-token',
@@ -186,6 +189,52 @@ class ApiModulesTest extends TestCase
             return $request->url() === 'https://api.mercadolibre.com/oauth/token'
                 && $request['client_id'] === 'panel-client-id'
                 && $request['client_secret'] === 'panel-client-secret'
+                && $request['code'] === 'oauth-code';
+        });
+    }
+
+    public function test_oauth_token_exchange_prefers_env_credentials_over_saved_panel_config(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        DB::table('app_settings')->insert([
+            'id' => 'global_ml_oauth_config',
+            'user_id' => null,
+            'config_data' => json_encode([
+                'client_id' => 'panel-client-id',
+                'client_secret' => Crypt::encryptString('panel-client-secret'),
+                'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
+            ]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        config()->set('services.mercado_livre.client_id', 'env-client-id');
+        config()->set('services.mercado_livre.client_secret', 'env-client-secret');
+
+        Http::fake([
+            'https://api.mercadolibre.com/oauth/token' => Http::response([
+                'access_token' => 'ml-access-token',
+                'token_type' => 'bearer',
+            ]),
+        ]);
+
+        $this->postJson('/api/integrations/mercado-livre/oauth/token', [
+            'code' => 'oauth-code',
+            'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
+        ])
+            ->assertOk()
+            ->assertJsonPath('access_token', 'ml-access-token');
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://api.mercadolibre.com/oauth/token'
+                && $request['client_id'] === 'env-client-id'
+                && $request['client_secret'] === 'env-client-secret'
                 && $request['code'] === 'oauth-code';
         });
     }
@@ -241,6 +290,49 @@ class ApiModulesTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'items')
             ->assertJsonPath('items.0.order_id', '66');
+
+        $this->getJson('/api/cover-agenda?limit=10&include_images=0')
+            ->assertOk()
+            ->assertJsonPath('items.0.front_image', null)
+            ->assertJsonPath('items.0.back_image', null)
+            ->assertJsonPath('items.0.has_front_image', true)
+            ->assertJsonPath('items.0.has_back_image', true);
+    }
+
+    public function test_authenticated_user_can_mark_cover_agenda_item_as_printed(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $coverId = DB::table('cover_agenda_items')->insertGetId([
+            'user_id' => $user->id,
+            'order_id' => '88',
+            'front_image' => 'data:image/png;base64,' . base64_encode('front'),
+            'back_image' => 'data:image/png;base64,' . base64_encode('back'),
+            'printed' => false,
+            'printed_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->patchJson("/api/cover-agenda/{$coverId}/printed", [
+            'printed' => true,
+            'printed_at' => '2026-03-17T10:00:00Z',
+        ])
+            ->assertOk()
+            ->assertJsonPath('item.id', (string) $coverId)
+            ->assertJsonPath('item.printed', true)
+            ->assertJsonPath('item.printed_at', '2026-03-17T10:00:00Z');
+
+        $this->assertDatabaseHas('cover_agenda_items', [
+            'id' => $coverId,
+            'printed' => true,
+            'printed_at' => '2026-03-17T10:00:00Z',
+        ]);
     }
 
     public function test_scanner_can_load_linked_cover_and_calendar_artwork(): void
@@ -827,6 +919,27 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('orders.0.id', 9001)
             ->assertJsonPath('orders.0.order_items.0.item.thumbnail', 'https://img.ml/item-1.jpg')
             ->assertJsonPath('orders.0.shipping_cost_seller', 12.5);
+    }
+
+    public function test_mercado_livre_service_updates_item_price_using_put_request(): void
+    {
+        Http::fake([
+            'https://api.mercadolibre.com/items/MLB123' => Http::response([
+                'id' => 'MLB123',
+                'price' => 99.9,
+            ]),
+        ]);
+
+        $service = app(\App\Services\MercadoLivreService::class);
+
+        $this->assertTrue($service->updateItemPrice('MLB123', 99.9, 'ml-access-token'));
+
+        Http::assertSent(function ($request) {
+            return $request->method() === 'PUT'
+                && $request->url() === 'https://api.mercadolibre.com/items/MLB123'
+                && $request->hasHeader('Authorization', 'Bearer ml-access-token')
+                && $request['price'] === 99.9;
+        });
     }
 
     public function test_authenticated_user_can_emit_and_check_fiscal_status(): void

@@ -19,13 +19,16 @@ final class CoverAgendaController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
+        $includeImages = $request->boolean('include_images', true);
         $query = DB::table('cover_agenda_items')->where('user_id', $user->id)->orderByDesc('updated_at');
         if ($request->has('printed')) {
             $query->where('printed', $request->boolean('printed'));
         }
 
         return response()->json([
-            'items' => $query->limit((int) $request->input('limit', 120))->get()->map(fn ($row) => $this->mapRow($row))->values(),
+            'items' => $query->limit((int) $request->input('limit', 120))->get()->map(
+                fn ($row) => $this->mapRow($row, $includeImages)
+            )->values(),
         ]);
     }
 
@@ -176,7 +179,7 @@ final class CoverAgendaController
         return DB::table('cover_agenda_items')->where('id', (int) $cover)->where('user_id', $user->id)->first();
     }
 
-    private function mapRow(object $row): array
+    private function mapRow(object $row, bool $includeImages = true): array
     {
         $columns = $this->resolveImageColumns();
 
@@ -184,8 +187,10 @@ final class CoverAgendaController
             'id' => (string) $row->id,
             'user_id' => (string) $row->user_id,
             'order_id' => $row->order_id,
-            'front_image' => $row->{$columns['front']} ?? null,
-            'back_image' => $row->{$columns['back']} ?? null,
+            'front_image' => $includeImages ? ($row->{$columns['front']} ?? null) : null,
+            'back_image' => $includeImages ? ($row->{$columns['back']} ?? null) : null,
+            'has_front_image' => !empty($row->{$columns['front']} ?? null),
+            'has_back_image' => !empty($row->{$columns['back']} ?? null),
             'printed' => (bool) $row->printed,
             'printed_at' => $row->printed_at,
             'created_at' => $row->created_at,
