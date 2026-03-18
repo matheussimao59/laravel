@@ -18,6 +18,7 @@ return [
     'allowed_origins_patterns' => [
         '#^https?://localhost(:\d+)?$#',
         '#^https?://127\.0\.0\.1(:\d+)?$#',
+        '#^https://([a-z0-9-]+\.)?unicaprint\.com\.br$#',
     ],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
