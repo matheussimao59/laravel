@@ -561,7 +561,7 @@ final class MercadoLivreService
     private function extractShipmentSellerCost(mixed $payload): float
     {
         if (is_array($payload)) {
-            if (array_is_list($payload)) {
+            if ($this->isListArray($payload)) {
                 $sum = 0;
                 foreach ($payload as $entry) {
                     if (!is_array($entry)) {
@@ -579,7 +579,7 @@ final class MercadoLivreService
             }
 
             foreach (['senders', 'costs'] as $field) {
-                if (!array_is_list($payload[$field] ?? null)) {
+                if (!$this->isListArray($payload[$field] ?? null)) {
                     continue;
                 }
 
@@ -612,6 +612,11 @@ final class MercadoLivreService
         }
 
         return 0;
+    }
+
+    private function isListArray(mixed $value): bool
+    {
+        return is_array($value) && array_is_list($value);
     }
 
     private function amountFromObject(array $row): float

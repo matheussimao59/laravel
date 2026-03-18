@@ -1078,6 +1078,63 @@ class ApiModulesTest extends TestCase
         ]);
     }
 
+    public function test_mercado_livre_sync_handles_null_shipment_cost_sections(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('mercado_livre_accounts')->insert([
+            'user_id' => $user->id,
+            'access_token' => Crypt::encryptString('stored-access-token'),
+            'token_type' => 'bearer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.mercadolibre.com/users/me' => Http::response([
+                'id' => 456,
+                'nickname' => 'null.cost.seller',
+            ]),
+            'https://api.mercadolibre.com/orders/search*' => Http::response([
+                'results' => [[
+                    'id' => 9100,
+                    'status' => 'paid',
+                    'date_created' => '2026-03-18T12:00:00Z',
+                    'order_items' => [],
+                    'shipping' => [
+                        'id' => 888,
+                    ],
+                ]],
+            ]),
+            'https://api.mercadolibre.com/shipments/888' => Http::response([
+                'id' => 888,
+                'status' => 'ready_to_ship',
+            ]),
+            'https://api.mercadolibre.com/shipments/888/costs' => Http::response([
+                'senders' => null,
+                'costs' => null,
+            ]),
+            'https://api.mercadolibre.com/shipments/888/payments' => Http::response([]),
+        ]);
+
+        $this->postJson('/api/integrations/mercado-livre/sync', [
+            'from_date' => '2026-03-01T00:00:00Z',
+            'to_date' => '2026-03-18T23:59:59Z',
+            'include_payments_details' => false,
+            'include_shipments_details' => true,
+            'max_pages' => 1,
+        ])
+            ->assertOk()
+            ->assertJsonPath('seller.id', 456)
+            ->assertJsonPath('orders.0.id', 9100)
+            ->assertJsonPath('orders.0.shipping_cost_seller', 0);
+    }
+
     public function test_mercado_livre_sync_retries_after_rate_limit_on_users_me(): void
     {
         $user = User::factory()->create([
