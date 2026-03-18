@@ -100,6 +100,8 @@ class ApiModulesTest extends TestCase
         ]);
 
         Sanctum::actingAs($admin);
+        config()->set('services.mercado_livre.client_id', '');
+        config()->set('services.mercado_livre.client_secret', '');
 
         $this->putJson('/api/integrations/mercado-livre/config', [
             'client_id' => 'ml-client-id',
@@ -145,6 +147,40 @@ class ApiModulesTest extends TestCase
             'client_secret' => 'ml-client-secret',
             'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
         ])->assertStatus(403);
+    }
+
+    public function test_mercado_livre_config_show_prefers_env_credentials_for_public_oauth_data(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        config()->set('services.mercado_livre.client_id', 'env-client-id');
+        config()->set('services.mercado_livre.client_secret', 'env-client-secret');
+        putenv('FRONTEND_URL=https://www.unicaprint.com.br');
+
+        DB::table('app_settings')->insert([
+            'id' => 'global_ml_oauth_config',
+            'user_id' => null,
+            'config_data' => json_encode([
+                'client_id' => 'panel-client-id',
+                'client_secret' => Crypt::encryptString('panel-client-secret'),
+                'redirect_uri' => 'https://unicaprint.com.br/mercado-livre',
+            ]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/integrations/mercado-livre/config')
+            ->assertOk()
+            ->assertJsonPath('config.client_id', 'env-client-id')
+            ->assertJsonPath('config.redirect_uri', 'https://unicaprint.com.br/mercado-livre-beta')
+            ->assertJsonPath('config.has_client_secret', true)
+            ->assertJsonPath('config.source', 'env')
+            ->assertJsonMissing(['client_secret' => 'env-client-secret']);
     }
 
     public function test_oauth_token_exchange_falls_back_to_saved_panel_config_when_env_is_empty(): void

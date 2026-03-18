@@ -19,7 +19,7 @@ final class MercadoLivreConfigController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
-        $row = $this->loadRow();
+        $row = $this->publicConfig();
 
         return response()->json([
             'config' => [
@@ -28,6 +28,7 @@ final class MercadoLivreConfigController
                 'configured' => $this->isConfigured($row),
                 'has_client_secret' => trim((string) ($row['client_secret'] ?? '')) !== '',
                 'updated_at' => $row['updated_at'] ?? null,
+                'source' => $row['source'] ?? 'panel',
             ],
         ]);
     }
@@ -142,7 +143,39 @@ final class MercadoLivreConfigController
             'redirect_uri' => $config['redirect_uri'] ?? '',
             'client_secret' => $secret,
             'updated_at' => $row->updated_at ?? null,
+            'source' => 'panel',
         ];
+    }
+
+    private function publicConfig(): array
+    {
+        $envClientId = trim((string) config('services.mercado_livre.client_id', ''));
+        $envClientSecret = trim((string) config('services.mercado_livre.client_secret', ''));
+        if ($envClientId !== '' || $envClientSecret !== '') {
+            return [
+                'client_id' => $envClientId,
+                'redirect_uri' => $this->defaultRedirectUri(),
+                'client_secret' => $envClientSecret,
+                'updated_at' => null,
+                'source' => 'env',
+            ];
+        }
+
+        return $this->loadRow();
+    }
+
+    private function defaultRedirectUri(): string
+    {
+        $frontendUrl = trim((string) env('FRONTEND_URL', ''));
+        if ($frontendUrl === '') {
+            $frontendUrl = trim((string) config('app.url', ''));
+        }
+
+        if ($frontendUrl === '') {
+            return '';
+        }
+
+        return rtrim($frontendUrl, '/') . '/mercado-livre-beta';
     }
 
     private function isConfigured(array $config): bool
