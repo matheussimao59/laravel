@@ -178,4 +178,14 @@ final class MercadoLivreController
             'message' => 'Conta Mercado Livre desconectada com sucesso.',
         ]);
     }
+
+    public function notifications(Request $request): JsonResponse
+    {
+        return response()->json([
+            'ok' => true,
+            'received' => true,
+            'topic' => $request->query('topic'),
+            'resource' => $request->query('resource'),
+        ]);
+    }
 }

@@ -175,7 +175,7 @@ final class MercadoLivreConfigController
             return '';
         }
 
-        return rtrim($frontendUrl, '/') . '/mercado-livre-beta';
+        return rtrim($frontendUrl, '/') . '/integracoes/mercado-livre/callback';
     }
 
     private function isConfigured(array $config): bool

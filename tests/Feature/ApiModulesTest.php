@@ -177,10 +177,19 @@ class ApiModulesTest extends TestCase
         $this->getJson('/api/integrations/mercado-livre/config')
             ->assertOk()
             ->assertJsonPath('config.client_id', 'env-client-id')
-            ->assertJsonPath('config.redirect_uri', 'https://unicaprint.com.br/mercado-livre-beta')
+            ->assertJsonPath('config.redirect_uri', 'https://unicaprint.com.br/integracoes/mercado-livre/callback')
             ->assertJsonPath('config.has_client_secret', true)
             ->assertJsonPath('config.source', 'env')
             ->assertJsonMissing(['client_secret' => 'env-client-secret']);
+    }
+
+    public function test_mercado_livre_notifications_endpoint_accepts_public_webhook_calls(): void
+    {
+        $this->postJson('/api/integrations/mercado-livre/notifications?topic=orders_v2&resource=/orders/123')
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('topic', 'orders_v2')
+            ->assertJsonPath('resource', '/orders/123');
     }
 
     public function test_oauth_token_exchange_falls_back_to_saved_panel_config_when_env_is_empty(): void
