@@ -1078,6 +1078,47 @@ class ApiModulesTest extends TestCase
         ]);
     }
 
+    public function test_mercado_livre_sync_retries_after_rate_limit_on_users_me(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('mercado_livre_accounts')->insert([
+            'user_id' => $user->id,
+            'access_token' => Crypt::encryptString('stored-access-token'),
+            'token_type' => 'bearer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.mercadolibre.com/users/me' => Http::sequence()
+                ->push([], 429)
+                ->push([
+                    'id' => 987,
+                    'nickname' => 'retry.seller',
+                ], 200),
+            'https://api.mercadolibre.com/orders/search*' => Http::response([
+                'results' => [],
+            ]),
+        ]);
+
+        $this->postJson('/api/integrations/mercado-livre/sync', [
+            'from_date' => '2026-03-01T00:00:00Z',
+            'to_date' => '2026-03-12T23:59:59Z',
+            'include_payments_details' => false,
+            'include_shipments_details' => true,
+            'max_pages' => 1,
+        ])
+            ->assertOk()
+            ->assertJsonPath('seller.id', 987)
+            ->assertJsonPath('seller.nickname', 'retry.seller');
+    }
+
     public function test_mercado_livre_service_updates_item_price_using_put_request(): void
     {
         Http::fake([

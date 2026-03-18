@@ -339,16 +339,31 @@ final class MercadoLivreService
         ?array $payload = null,
         array $headers = [],
     ): mixed {
-        $client = Http::acceptJson()
-            ->timeout(45)
-            ->withToken($accessToken)
-            ->withHeaders($headers);
+        $response = null;
+        $attempts = 3;
 
-        $response = match (strtoupper($method)) {
-            'POST' => $client->post($this->baseUrl() . $path, $payload ?? []),
-            'PUT' => $client->put($this->baseUrl() . $path, $payload ?? []),
-            default => $client->get($this->baseUrl() . $path),
-        };
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $client = Http::acceptJson()
+                ->timeout(45)
+                ->withToken($accessToken)
+                ->withHeaders($headers);
+
+            $response = match (strtoupper($method)) {
+                'POST' => $client->post($this->baseUrl() . $path, $payload ?? []),
+                'PUT' => $client->put($this->baseUrl() . $path, $payload ?? []),
+                default => $client->get($this->baseUrl() . $path),
+            };
+
+            if ($response->status() !== 429 || $attempt === $attempts) {
+                break;
+            }
+
+            usleep($attempt * 700000);
+        }
+
+        if (!$response instanceof Response) {
+            throw new ExternalServiceException('Falha ao comunicar com o Mercado Livre.', 502);
+        }
 
         return $this->decodeResponse($response, $path);
     }
@@ -361,6 +376,14 @@ final class MercadoLivreService
         }
 
         if (!$response->successful()) {
+            if ($response->status() === 429) {
+                throw new ExternalServiceException(
+                    'Mercado Livre limitou temporariamente a consulta. Aguarde alguns segundos e tente novamente.',
+                    429,
+                    $parsed
+                );
+            }
+
             throw new ExternalServiceException(
                 json_encode([
                     'path' => $context,
