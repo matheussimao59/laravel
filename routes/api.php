@@ -71,6 +71,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('integrations/mercado-livre')->group(function () {
         Route::get('/config', [MercadoLivreConfigController::class, 'show']);
         Route::put('/config', [MercadoLivreConfigController::class, 'update']);
+        Route::get('/account', [MercadoLivreController::class, 'account']);
+        Route::delete('/account', [MercadoLivreController::class, 'disconnect']);
         Route::post('/oauth/token', [MercadoLivreController::class, 'oauthToken']);
         Route::post('/sync', [MercadoLivreController::class, 'sync']);
         Route::post('/customization', [MercadoLivreController::class, 'sendCustomization']);

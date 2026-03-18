@@ -219,7 +219,7 @@ class ApiModulesTest extends TestCase
             'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
         ])
             ->assertOk()
-            ->assertJsonPath('access_token', 'ml-access-token');
+            ->assertJsonPath('account.connected', true);
 
         Http::assertSent(function ($request) {
             return $request->url() === 'https://api.mercadolibre.com/oauth/token'
@@ -265,7 +265,7 @@ class ApiModulesTest extends TestCase
             'redirect_uri' => 'https://unicaprint.com.br/mercado-livre-beta',
         ])
             ->assertOk()
-            ->assertJsonPath('access_token', 'ml-access-token');
+            ->assertJsonPath('account.connected', true);
 
         Http::assertSent(function ($request) {
             return $request->url() === 'https://api.mercadolibre.com/oauth/token'
@@ -980,10 +980,15 @@ class ApiModulesTest extends TestCase
             'code_verifier' => 'pkce-verifier',
         ])
             ->assertOk()
-            ->assertJsonPath('access_token', 'ml-access-token');
+            ->assertJsonPath('account.connected', true)
+            ->assertJsonPath('account.has_refresh_token', false);
+
+        $this->assertDatabaseHas('mercado_livre_accounts', [
+            'user_id' => $user->id,
+            'token_type' => 'bearer',
+        ]);
 
         $this->postJson('/api/integrations/mercado-livre/sync', [
-            'access_token' => 'ml-access-token',
             'from_date' => '2026-03-01T00:00:00Z',
             'to_date' => '2026-03-12T23:59:59Z',
             'include_payments_details' => false,
@@ -995,6 +1000,39 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('orders.0.id', 9001)
             ->assertJsonPath('orders.0.order_items.0.item.thumbnail', 'https://img.ml/item-1.jpg')
             ->assertJsonPath('orders.0.shipping_cost_seller', 12.5);
+
+        $this->getJson('/api/integrations/mercado-livre/account')
+            ->assertOk()
+            ->assertJsonPath('account.connected', true)
+            ->assertJsonPath('account.seller.id', 123)
+            ->assertJsonPath('account.seller.nickname', 'unica.print');
+    }
+
+    public function test_authenticated_user_can_disconnect_stored_ml_account(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('mercado_livre_accounts')->insert([
+            'user_id' => $user->id,
+            'access_token' => Crypt::encryptString('stored-access-token'),
+            'refresh_token' => Crypt::encryptString('stored-refresh-token'),
+            'token_type' => 'bearer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->deleteJson('/api/integrations/mercado-livre/account')
+            ->assertOk()
+            ->assertJsonPath('message', 'Conta Mercado Livre desconectada com sucesso.');
+
+        $this->assertDatabaseMissing('mercado_livre_accounts', [
+            'user_id' => $user->id,
+        ]);
     }
 
     public function test_mercado_livre_service_updates_item_price_using_put_request(): void

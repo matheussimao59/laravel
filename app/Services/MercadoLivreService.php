@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\MercadoLivreAccount;
+use App\Models\User;
 use App\Support\ExternalServiceException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Crypt;
@@ -216,6 +218,72 @@ final class MercadoLivreService
         ];
     }
 
+    public function saveOAuthAccount(User $user, array $tokenPayload): array
+    {
+        $account = MercadoLivreAccount::firstOrNew([
+            'user_id' => $user->id,
+        ]);
+
+        $expiresIn = max(0, (int) ($tokenPayload['expires_in'] ?? 0));
+        $refreshExpiresIn = max(0, (int) ($tokenPayload['refresh_token_expires_in'] ?? 0));
+
+        $account->access_token = trim((string) ($tokenPayload['access_token'] ?? ''));
+        $account->refresh_token = trim((string) ($tokenPayload['refresh_token'] ?? ''));
+        $account->token_type = trim((string) ($tokenPayload['token_type'] ?? ''));
+        $account->scope = trim((string) ($tokenPayload['scope'] ?? ''));
+        $account->expires_at = $expiresIn > 0 ? now()->addSeconds($expiresIn) : null;
+        $account->refresh_expires_at = $refreshExpiresIn > 0 ? now()->addSeconds($refreshExpiresIn) : null;
+        $account->save();
+
+        return $this->accountStatusForUser($user);
+    }
+
+    public function accountStatusForUser(User $user): array
+    {
+        $account = $user->mercadoLivreAccount()->first();
+
+        return [
+            'connected' => $account !== null && trim((string) $account->access_token) !== '',
+            'seller' => $this->sellerFromAccount($account),
+            'expires_at' => $account?->expires_at?->toIso8601String(),
+            'refresh_expires_at' => $account?->refresh_expires_at?->toIso8601String(),
+            'last_synced_at' => $account?->last_synced_at?->toIso8601String(),
+            'has_refresh_token' => $account !== null && trim((string) $account->refresh_token) !== '',
+        ];
+    }
+
+    public function disconnectAccountForUser(User $user): void
+    {
+        $user->mercadoLivreAccount()->delete();
+    }
+
+    public function accessTokenForUser(User $user): string
+    {
+        $account = $user->mercadoLivreAccount()->first();
+        $token = trim((string) ($account?->access_token ?? ''));
+
+        if ($token === '') {
+            throw new ExternalServiceException('Conta Mercado Livre nao conectada para este usuario.', 422);
+        }
+
+        return $token;
+    }
+
+    public function rememberSellerForUser(User $user, array $seller): void
+    {
+        $account = MercadoLivreAccount::firstOrNew([
+            'user_id' => $user->id,
+        ]);
+
+        $account->seller_id = ($seller['id'] ?? null) !== null ? (int) $seller['id'] : null;
+        $account->seller_nickname = trim((string) ($seller['nickname'] ?? '')) ?: null;
+        $account->seller_first_name = trim((string) ($seller['first_name'] ?? '')) ?: null;
+        $account->seller_last_name = trim((string) ($seller['last_name'] ?? '')) ?: null;
+        $account->seller_payload = $seller;
+        $account->last_synced_at = now();
+        $account->save();
+    }
+
     private function baseUrl(): string
     {
         return rtrim((string) config('services.mercado_livre.base_url', 'https://api.mercadolibre.com'), '/');
@@ -359,6 +427,28 @@ final class MercadoLivreService
         }
 
         return null;
+    }
+
+    private function sellerFromAccount(?MercadoLivreAccount $account): ?array
+    {
+        if ($account === null) {
+            return null;
+        }
+
+        if (is_array($account->seller_payload) && $account->seller_payload !== []) {
+            return $account->seller_payload;
+        }
+
+        if (($account->seller_id ?? 0) <= 0) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $account->seller_id,
+            'nickname' => $account->seller_nickname,
+            'first_name' => $account->seller_first_name,
+            'last_name' => $account->seller_last_name,
+        ];
     }
 
     private function attachShipmentsToOrders(array &$orders, string $accessToken): void
