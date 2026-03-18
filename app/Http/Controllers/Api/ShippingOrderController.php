@@ -188,37 +188,51 @@ final class ShippingOrderController
             return response()->json(['message' => 'Informe um termo de busca em `q`, `tracking` ou `order`.'], 422);
         }
 
+        $normalizedTerm = $this->normalizeScanValue($term);
         $prefixTerm = $term . '%';
         $likeTerm = '%' . $term . '%';
+        $normalizedPrefixTerm = $normalizedTerm . '%';
+        $normalizedLikeTerm = '%' . $normalizedTerm . '%';
+        $trackingSql = $this->normalizedScanSql('tracking_number');
+        $orderSql = $this->normalizedScanSql('platform_order_number');
+        $recipientSql = $this->normalizedScanSql('recipient_name');
 
         $rows = DB::table('shipping_orders')
             ->where('user_id', $user->id)
-            ->where(function ($builder) use ($term) {
+            ->where(function ($builder) use ($term, $normalizedTerm, $prefixTerm, $likeTerm, $normalizedPrefixTerm, $normalizedLikeTerm, $trackingSql, $orderSql, $recipientSql) {
                 $builder
                     ->where('tracking_number', $term)
-                    ->orWhere('platform_order_number', $term);
-            })
-            ->orWhere(function ($builder) use ($user, $prefixTerm, $likeTerm) {
-                $builder
-                    ->where('user_id', $user->id)
-                    ->where(function ($inner) use ($prefixTerm, $likeTerm) {
-                        $inner
-                            ->where('tracking_number', 'like', $prefixTerm)
-                            ->orWhere('platform_order_number', 'like', $prefixTerm)
-                            ->orWhere('tracking_number', 'like', $likeTerm)
-                            ->orWhere('platform_order_number', 'like', $likeTerm)
-                            ->orWhere('recipient_name', 'like', $likeTerm);
-                    });
+                    ->orWhere('platform_order_number', $term)
+                    ->orWhere('tracking_number', 'like', $prefixTerm)
+                    ->orWhere('platform_order_number', 'like', $prefixTerm)
+                    ->orWhere('tracking_number', 'like', $likeTerm)
+                    ->orWhere('platform_order_number', 'like', $likeTerm)
+                    ->orWhere('recipient_name', 'like', $likeTerm);
+
+                if ($normalizedTerm !== '') {
+                    $builder
+                        ->orWhereRaw("{$trackingSql} = ?", [$normalizedTerm])
+                        ->orWhereRaw("{$orderSql} = ?", [$normalizedTerm])
+                        ->orWhereRaw("{$trackingSql} like ?", [$normalizedPrefixTerm])
+                        ->orWhereRaw("{$orderSql} like ?", [$normalizedPrefixTerm])
+                        ->orWhereRaw("{$trackingSql} like ?", [$normalizedLikeTerm])
+                        ->orWhereRaw("{$orderSql} like ?", [$normalizedLikeTerm])
+                        ->orWhereRaw("{$recipientSql} like ?", [$normalizedLikeTerm]);
+                }
             })
             ->orderByRaw(
                 "case
                     when tracking_number = ? then 0
                     when platform_order_number = ? then 1
-                    when tracking_number like ? then 2
-                    when platform_order_number like ? then 3
-                    else 4
+                    when {$trackingSql} = ? then 2
+                    when {$orderSql} = ? then 3
+                    when tracking_number like ? then 4
+                    when platform_order_number like ? then 5
+                    when {$trackingSql} like ? then 6
+                    when {$orderSql} like ? then 7
+                    else 8
                 end",
-                [$term, $term, $prefixTerm, $prefixTerm]
+                [$term, $term, $normalizedTerm, $normalizedTerm, $prefixTerm, $prefixTerm, $normalizedPrefixTerm, $normalizedPrefixTerm]
             )
             ->orderByDesc('updated_at')
             ->limit(20)
@@ -583,6 +597,19 @@ final class ShippingOrderController
         $normalized = preg_replace('/^(PEDIDO|ID)\s*:?\s*/', '', $normalized) ?: $normalized;
         $normalized = str_replace(['#', ' ', '-', ':'], '', $normalized);
         return trim($normalized);
+    }
+
+    private function normalizeScanValue(string $value): string
+    {
+        $normalized = strtoupper(trim($value));
+        $normalized = preg_replace('/[^A-Z0-9]+/', '', $normalized) ?: '';
+
+        return trim($normalized);
+    }
+
+    private function normalizedScanSql(string $column): string
+    {
+        return "replace(replace(replace(replace(replace(replace(replace(replace(upper(coalesce({$column}, '')), ' ', ''), '-', ''), '.', ''), '/', ''), '\\\\', ''), '#', ''), ':', ''), '_', '')";
     }
 
     private function normalizedArtworkOrderSql(): string

@@ -460,6 +460,40 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('artwork.calendar.quantity', 2);
     }
 
+    public function test_scanner_can_find_shipping_order_by_normalized_tracking_or_order_number(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $orderId = DB::table('shipping_orders')->insertGetId([
+            'user_id' => $user->id,
+            'import_key' => 'scan-normalized-1',
+            'platform_order_number' => 'Pedido #123-456',
+            'ad_name' => 'Agenda Azul',
+            'product_qty' => 1,
+            'recipient_name' => 'Maria Clara',
+            'tracking_number' => 'BR 123.456-789',
+            'packed' => false,
+            'production_separated' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/shipping/orders/scan?q=BR123456789')
+            ->assertOk()
+            ->assertJsonPath('orders.0.id', (string) $orderId)
+            ->assertJsonPath('orders.0.tracking_number', 'BR 123.456-789');
+
+        $this->getJson('/api/shipping/orders/scan?q=123456')
+            ->assertOk()
+            ->assertJsonPath('orders.0.id', (string) $orderId)
+            ->assertJsonPath('orders.0.platform_order_number', 'Pedido #123-456');
+    }
+
     public function test_admin_can_import_shopee_rows_filter_by_month_and_auto_create_unique_products(): void
     {
         $user = User::factory()->create([
