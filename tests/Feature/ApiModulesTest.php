@@ -503,6 +503,80 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('orders.0.platform_order_number', 'Pedido #123-456');
     }
 
+    public function test_shipping_import_ignores_duplicate_order_and_only_fills_missing_fields(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/shipping/orders/import', [
+            'rows' => [[
+                'import_key' => 'pedido|mlb123',
+                'platform_order_number' => 'MLB123',
+                'ad_name' => null,
+                'variation' => null,
+                'image_url' => null,
+                'buyer_notes' => null,
+                'observations' => 'Observacao definida no sistema',
+                'product_qty' => 1,
+                'recipient_name' => null,
+                'tracking_number' => null,
+                'source_file_name' => 'arquivo-1.xlsx',
+                'shipping_deadline' => null,
+                'row_raw' => [
+                    'pedido' => 'MLB123',
+                ],
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.inserted', 1)
+            ->assertJsonPath('stats.updated', 0)
+            ->assertJsonPath('stats.unchanged', 0);
+
+        $this->postJson('/api/shipping/orders/import', [
+            'rows' => [[
+                'import_key' => 'pedido|mlb123|arquivo-2',
+                'platform_order_number' => 'Pedido #MLB123',
+                'ad_name' => 'Agenda Premium',
+                'variation' => 'Azul',
+                'image_url' => 'https://img.test/agenda-premium.jpg',
+                'buyer_notes' => 'Cliente pediu envio rapido',
+                'observations' => 'Observacao nova da planilha',
+                'product_qty' => 2,
+                'recipient_name' => 'Maria Silva',
+                'tracking_number' => 'BR 123.456-789',
+                'source_file_name' => 'arquivo-2.xlsx',
+                'shipping_deadline' => '2026-03-20',
+                'row_raw' => [
+                    'pedido' => 'Pedido #MLB123',
+                    'nome_do_anuncio' => 'Agenda Premium',
+                ],
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.inserted', 0)
+            ->assertJsonPath('stats.updated', 1)
+            ->assertJsonPath('stats.unchanged', 0);
+
+        $orders = DB::table('shipping_orders')
+            ->where('user_id', $user->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(1, $orders);
+        $this->assertSame('MLB123', $orders[0]->platform_order_number);
+        $this->assertSame('Agenda Premium', $orders[0]->ad_name);
+        $this->assertSame('Azul', $orders[0]->variation);
+        $this->assertSame('Maria Silva', $orders[0]->recipient_name);
+        $this->assertSame('BR 123.456-789', $orders[0]->tracking_number);
+        $this->assertSame('Observacao definida no sistema', $orders[0]->observations);
+        $this->assertSame(1, (int) $orders[0]->product_qty);
+        $this->assertSame('2026-03-20', $orders[0]->shipping_deadline);
+    }
+
     public function test_admin_can_import_shopee_rows_filter_by_month_and_auto_create_unique_products(): void
     {
         $user = User::factory()->create([

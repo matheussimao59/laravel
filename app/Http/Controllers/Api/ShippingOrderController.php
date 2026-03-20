@@ -84,17 +84,19 @@ final class ShippingOrderController
                 ], 422);
             }
 
-            $existing = DB::table('shipping_orders')
-                ->where('user_id', $user->id)
-                ->where('import_key', $row['import_key'])
-                ->first();
+            $existing = $this->findExistingImportedOrder(
+                (int) $user->id,
+                (string) $row['import_key'],
+                $row['platform_order_number'] ?? null,
+                $row['tracking_number'] ?? null,
+            );
 
             if (!$existing) {
                 DB::table('shipping_orders')->insert([
                     'user_id' => $user->id,
                     'import_key' => $row['import_key'],
                     'platform_order_number' => $row['platform_order_number'] ?? null,
-                    'ad_name' => $row['ad_name'] ?? 'Produto sem titulo',
+                    'ad_name' => $this->normalizeIncomingShippingField('ad_name', $row['ad_name'] ?? null),
                     'variation' => $row['variation'] ?? null,
                     'image_url' => $row['image_url'] ?? null,
                     'buyer_notes' => $row['buyer_notes'] ?? null,
@@ -136,8 +138,8 @@ final class ShippingOrderController
                 'tracking_number',
                 'source_file_name',
             ] as $field) {
-                $current = $existing->{$field};
-                $incoming = $row[$field] ?? null;
+                $current = $this->normalizeExistingShippingField($field, $existing->{$field});
+                $incoming = $this->normalizeIncomingShippingField($field, $row[$field] ?? null);
                 if ($this->isBlank($current) && !$this->isBlank($incoming)) {
                     $payload[$field] = $incoming;
                 }
@@ -641,5 +643,97 @@ final class ShippingOrderController
     private function isBlank(mixed $value): bool
     {
         return $value === null || $value === '' || (is_string($value) && trim($value) === '');
+    }
+
+    private function findExistingImportedOrder(
+        int $userId,
+        string $importKey,
+        mixed $platformOrderNumber,
+        mixed $trackingNumber,
+    ): ?object {
+        $existing = DB::table('shipping_orders')
+            ->where('user_id', $userId)
+            ->where('import_key', $importKey)
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        $normalizedOrderNumber = $this->normalizeImportedOrderNumber(trim((string) $platformOrderNumber));
+        if ($normalizedOrderNumber !== '') {
+            $existing = DB::table('shipping_orders')
+                ->where('user_id', $userId)
+                ->where(function ($builder) use ($platformOrderNumber, $normalizedOrderNumber) {
+                    $rawValue = trim((string) $platformOrderNumber);
+                    if ($rawValue !== '') {
+                        $builder->where('platform_order_number', $rawValue);
+                    }
+
+                    $builder->orWhereRaw(
+                        $this->normalizedScanSql('platform_order_number') . ' = ?',
+                        [$normalizedOrderNumber]
+                    );
+                })
+                ->orderByDesc('updated_at')
+                ->first();
+
+            if ($existing) {
+                return $existing;
+            }
+        }
+
+        $normalizedTracking = $this->normalizeScanValue(trim((string) $trackingNumber));
+        if ($normalizedTracking === '') {
+            return null;
+        }
+
+        return DB::table('shipping_orders')
+            ->where('user_id', $userId)
+            ->where(function ($builder) use ($trackingNumber, $normalizedTracking) {
+                $rawValue = trim((string) $trackingNumber);
+                if ($rawValue !== '') {
+                    $builder->where('tracking_number', $rawValue);
+                }
+
+                $builder->orWhereRaw(
+                    $this->normalizedScanSql('tracking_number') . ' = ?',
+                    [$normalizedTracking]
+                );
+            })
+            ->orderByDesc('updated_at')
+            ->first();
+    }
+
+    private function normalizeIncomingShippingField(string $field, mixed $value): mixed
+    {
+        if ($field === 'ad_name' && $this->isPlaceholderAdName($value)) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private function normalizeExistingShippingField(string $field, mixed $value): mixed
+    {
+        if ($field === 'ad_name' && $this->isPlaceholderAdName($value)) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private function isPlaceholderAdName(mixed $value): bool
+    {
+        return trim((string) $value) === 'Produto sem titulo';
+    }
+
+    private function normalizeImportedOrderNumber(string $value): string
+    {
+        $normalized = strtoupper(trim($value));
+        $normalized = preg_replace('/^(PEDIDO|ID)\s*:?\s*/', '', $normalized) ?: $normalized;
+        $normalized = preg_replace('/[^A-Z0-9]+/', '', $normalized) ?: '';
+
+        return trim($normalized);
     }
 }
