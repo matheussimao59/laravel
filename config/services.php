@@ -48,4 +48,10 @@ return [
         'status_path_template' => env('NFE_STATUS_PATH_TEMPLATE', '/v1/nfe/{id}'),
     ],
 
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+        'model' => env('OPENAI_MODEL', 'gpt-5-mini'),
+    ],
+
 ];

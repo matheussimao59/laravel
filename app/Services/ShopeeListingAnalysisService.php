@@ -6,6 +6,7 @@ use App\Support\ExternalServiceException;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Support\Facades\Http;
+use Throwable;
 
 final class ShopeeListingAnalysisService
 {
@@ -17,7 +18,7 @@ final class ShopeeListingAnalysisService
         $competitorScores = $this->scoresForListing($competitor, $competitor);
         $mineScores = $this->scoresForListing($mine, $competitor);
 
-        return [
+        $analysis = [
             'competitor' => $competitor,
             'mine' => $mine,
             'summary' => [
@@ -38,6 +39,8 @@ final class ShopeeListingAnalysisService
             'actions' => $this->actionItems($competitor, $mine, $mineScores),
             'suggested_title' => $this->suggestedTitle($competitor, $mine),
         ];
+
+        return $this->enhanceWithOpenAi($analysis);
     }
 
     private function fetchListing(string $url): array
@@ -750,5 +753,166 @@ final class ShopeeListingAnalysisService
         $host = strtolower((string) parse_url($url, PHP_URL_HOST));
 
         return str_contains($host, 'shopee');
+    }
+
+    private function enhanceWithOpenAi(array $analysis): array
+    {
+        $apiKey = trim((string) config('services.openai.api_key'));
+        if ($apiKey === '') {
+            return $analysis;
+        }
+
+        try {
+            $payload = [
+                'model' => (string) config('services.openai.model', 'gpt-5-mini'),
+                'input' => [
+                    [
+                        'role' => 'system',
+                        'content' => [
+                            [
+                                'type' => 'input_text',
+                                'text' => 'Voce e um analista especialista em Shopee. Compare o anuncio concorrente e o meu anuncio. Responda apenas com JSON estruturado. Priorize diagnostico pratico e correcao objetiva. Nao invente dados ausentes.',
+                            ],
+                        ],
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'input_text',
+                                'text' => json_encode([
+                                    'goal' => 'Comparar dois anuncios da Shopee e devolver um plano de melhorias claro para UX visual.',
+                                    'data' => $analysis,
+                                    'instructions' => [
+                                        'Preencha diagnosis com 4 blocos: seo, visual, description, social.',
+                                        'Cada bloco deve ter title, tone, result e suggestion.',
+                                        'Preencha actions com 3 a 6 cards curtos.',
+                                        'Gere suggested_title melhor que o atual se houver dados suficientes.',
+                                        'Se algum dado estiver ausente, explique a limitacao sem inventar.',
+                                    ],
+                                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                            ],
+                        ],
+                    ],
+                ],
+                'max_output_tokens' => 2200,
+                'text' => [
+                    'format' => [
+                        'type' => 'json_schema',
+                        'name' => 'shopee_ad_analysis',
+                        'strict' => true,
+                        'schema' => $this->openAiSchema(),
+                    ],
+                ],
+            ];
+
+            $response = Http::baseUrl((string) config('services.openai.base_url', 'https://api.openai.com/v1'))
+                ->timeout(40)
+                ->withToken($apiKey)
+                ->acceptJson()
+                ->post('/responses', $payload);
+
+            if (!$response->successful()) {
+                return $analysis;
+            }
+
+            $parsed = $this->extractOpenAiJson($response->json());
+            if (!is_array($parsed)) {
+                return $analysis;
+            }
+
+            if (isset($parsed['diagnosis']) && is_array($parsed['diagnosis'])) {
+                $analysis['diagnosis'] = $parsed['diagnosis'];
+            }
+
+            if (isset($parsed['actions']) && is_array($parsed['actions'])) {
+                $analysis['actions'] = $parsed['actions'];
+            }
+
+            if (!empty($parsed['suggested_title']) && is_string($parsed['suggested_title'])) {
+                $analysis['suggested_title'] = trim($parsed['suggested_title']);
+            }
+
+            if (isset($parsed['summary_note']) && is_string($parsed['summary_note'])) {
+                $analysis['summary']['ai_note'] = trim($parsed['summary_note']);
+            }
+
+            return $analysis;
+        } catch (Throwable) {
+            return $analysis;
+        }
+    }
+
+    private function extractOpenAiJson(array $payload): ?array
+    {
+        $candidates = [
+            data_get($payload, 'output_text'),
+            data_get($payload, 'output.0.content.0.text'),
+            data_get($payload, 'output.1.content.0.text'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+
+            $decoded = json_decode($candidate, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return null;
+    }
+
+    private function openAiSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => [
+                'summary_note' => [
+                    'type' => 'string',
+                ],
+                'suggested_title' => [
+                    'type' => 'string',
+                ],
+                'diagnosis' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'id' => ['type' => 'string'],
+                            'title' => ['type' => 'string'],
+                            'tone' => [
+                                'type' => 'string',
+                                'enum' => ['critical', 'warning', 'success'],
+                            ],
+                            'result' => ['type' => 'string'],
+                            'suggestion' => ['type' => 'string'],
+                        ],
+                        'required' => ['id', 'title', 'tone', 'result', 'suggestion'],
+                    ],
+                ],
+                'actions' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'title' => ['type' => 'string'],
+                            'detail' => ['type' => 'string'],
+                            'tone' => [
+                                'type' => 'string',
+                                'enum' => ['critical', 'warning', 'success'],
+                            ],
+                        ],
+                        'required' => ['title', 'detail', 'tone'],
+                    ],
+                ],
+            ],
+            'required' => ['summary_note', 'suggested_title', 'diagnosis', 'actions'],
+        ];
     }
 }
