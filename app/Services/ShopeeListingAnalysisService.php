@@ -104,11 +104,11 @@ final class ShopeeListingAnalysisService
         return [
             'url' => $url,
             'host' => parse_url($url, PHP_URL_HOST) ?: '',
-            'title' => $this->firstFilled([
+            'title' => $this->firstUsefulText([
                 $decoded['title'] ?? null,
                 $this->titleFromUrl($url),
             ]),
-            'description' => $this->firstFilled([
+            'description' => $this->firstUsefulText([
                 $decoded['description'] ?? null,
                 $this->titleFromUrl($url),
             ]),
@@ -141,7 +141,7 @@ final class ShopeeListingAnalysisService
         $primaryJson = $jsonLd[0] ?? [];
         $urlTitle = $this->titleFromUrl($url);
 
-        $title = $this->firstFilled([
+        $title = $this->firstUsefulText([
             $meta['og:title'] ?? null,
             $meta['twitter:title'] ?? null,
             is_string($primaryJson['name'] ?? null) ? $primaryJson['name'] : null,
@@ -150,7 +150,7 @@ final class ShopeeListingAnalysisService
             $urlTitle,
         ]);
 
-        $description = $this->firstFilled([
+        $description = $this->firstUsefulText([
             $meta['og:description'] ?? null,
             $meta['description'] ?? null,
             is_string($primaryJson['description'] ?? null) ? $primaryJson['description'] : null,
@@ -387,7 +387,7 @@ final class ShopeeListingAnalysisService
 
     private function suggestedTitle(array $competitor, array $mine): string
     {
-        $baseTitle = $this->firstFilled([
+        $baseTitle = $this->firstUsefulText([
             $mine['title'] ?? null,
             $competitor['title'] ?? null,
         ]);
@@ -396,21 +396,20 @@ final class ShopeeListingAnalysisService
             array_slice($mine['keywords'] ?? [], 0, 4)
         )));
 
-        $tokens = array_values(array_unique(array_filter(array_merge(
-            $this->keywordsFor($baseTitle),
-            $keywords
-        ))));
-
-        $suggestion = ucfirst(trim(implode(' ', array_slice($tokens, 0, 10))));
+        $tokens = array_values(array_unique(array_filter(array_merge($this->keywordsFor($baseTitle), $keywords))));
+        $lead = $baseTitle !== '' ? $baseTitle : $this->humanizeKeywords($tokens, 6);
+        $boost = array_slice(array_values(array_diff($tokens, $this->keywordsFor($lead))), 0, 4);
+        $suggestion = trim($lead . ' ' . $this->humanizeKeywords($boost, 4));
 
         return mb_strlen($suggestion) >= 35 ? $suggestion : ucfirst(trim($baseTitle));
     }
 
     private function suggestedDescription(array $competitor, array $mine): string
     {
-        $productName = $this->firstFilled([
+        $productName = $this->firstUsefulText([
             $mine['title'] ?? null,
             $competitor['title'] ?? null,
+            $this->humanizeKeywords(array_merge($mine['keywords'] ?? [], $competitor['keywords'] ?? []), 6),
             'Produto personalizado',
         ]);
 
@@ -424,11 +423,11 @@ final class ShopeeListingAnalysisService
             : 'Destaque o termo principal do produto logo no inicio.';
 
         return trim(implode("\n", [
-            $productName . ' pensado para chamar atencao na busca e converter melhor.',
+            $productName . ' criado para disputar o topo da busca e converter com mais confianca.',
             'Destaques principais:',
-            '- Material e acabamento explicados com clareza.',
-            '- Medidas, uso e diferencas do produto logo no inicio.',
-            '- Embalagem segura, prazo de envio e garantia destacados.',
+            '- Material, acabamento e beneficio principal explicados com clareza logo no inicio.',
+            '- Medidas, modo de uso e diferenciais reais organizados em leitura rapida.',
+            '- Embalagem segura, prazo de envio e garantia destacados para reduzir duvida.',
             '- Beneficios reais para o cliente em frases curtas, fortes e escaneaveis.',
             $keywordLine,
             'Finalize com uma chamada objetiva para compra, personalizacao e decisao imediata.',
@@ -494,7 +493,9 @@ final class ShopeeListingAnalysisService
             return null;
         }
 
-        return trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        return $this->sanitizeListingText(
+            trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))
+        );
     }
 
     private function extractImages(array $jsonLd, array $meta, string $html): array
@@ -740,7 +741,7 @@ final class ShopeeListingAnalysisService
                 continue;
             }
 
-            if (in_array($word, ['de', 'do', 'da', 'dos', 'das', 'para', 'com', 'sem', 'por', 'uma', 'um', 'nos', 'nas', 'que', 'pra'], true)) {
+            if (in_array($word, ['de', 'do', 'da', 'dos', 'das', 'para', 'com', 'sem', 'por', 'uma', 'um', 'nos', 'nas', 'que', 'pra', 'shopee', 'domain', 'domains', 'produto', 'item', 'www', 'http', 'https', 'br', 'com'], true)) {
                 continue;
             }
 
@@ -777,6 +778,18 @@ final class ShopeeListingAnalysisService
     {
         foreach ($values as $value) {
             $normalized = trim((string) $value);
+            if ($normalized !== '') {
+                return $normalized;
+            }
+        }
+
+        return '';
+    }
+
+    private function firstUsefulText(array $values): string
+    {
+        foreach ($values as $value) {
+            $normalized = $this->sanitizeListingText((string) $value);
             if ($normalized !== '') {
                 return $normalized;
             }
@@ -848,7 +861,45 @@ final class ShopeeListingAnalysisService
         $decoded = preg_replace('/\s+/', ' ', $decoded) ?? $decoded;
         $decoded = trim($decoded);
 
-        return mb_convert_case($decoded, MB_CASE_TITLE, 'UTF-8');
+        return $this->sanitizeListingText(mb_convert_case($decoded, MB_CASE_TITLE, 'UTF-8'));
+    }
+
+    private function sanitizeListingText(string $value): string
+    {
+        $normalized = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
+        $normalized = trim($normalized);
+
+        if ($normalized === '') {
+            return '';
+        }
+
+        $lower = mb_strtolower($this->stripAccents($normalized));
+
+        foreach (['shopee__domain', 'shopee domain', 'domain shopee'] as $garbage) {
+            if (str_contains($lower, $garbage)) {
+                $normalized = trim(str_ireplace($garbage, '', $normalized));
+                $lower = mb_strtolower($this->stripAccents($normalized));
+            }
+        }
+
+        $normalized = trim(preg_replace('/\s+/', ' ', $normalized) ?? $normalized);
+
+        if ($normalized === '' || in_array($lower, ['shopee', 'domain', 'shopee__domain'], true)) {
+            return '';
+        }
+
+        return $normalized;
+    }
+
+    private function humanizeKeywords(array $keywords, int $limit = 6): string
+    {
+        $clean = array_slice(array_values(array_unique(array_filter(array_map(
+            fn ($keyword) => $this->sanitizeListingText(mb_convert_case((string) $keyword, MB_CASE_TITLE, 'UTF-8')),
+            $keywords
+        )))), 0, $limit);
+
+        return trim(implode(' ', $clean));
     }
 
     private function enhanceWithOpenAi(array $analysis): array

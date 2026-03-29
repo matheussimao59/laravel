@@ -1137,8 +1137,8 @@ HTML;
             ->assertJsonPath('analysis.diagnosis.2.id', 'description')
             ->assertJsonPath('analysis.diagnosis.3.id', 'social')
             ->assertJsonPath('analysis.actions.0.title', 'Correcao urgente')
-            ->assertJsonPath('analysis.suggested_title', 'Agenda personalizada capa dura planner premium feminina')
-            ->assertJsonPath('analysis.suggested_description', "Agenda personalizada capa dura pensado para chamar atencao na busca e converter melhor.\nDestaques principais:\n- Material e acabamento explicados com clareza.\n- Medidas, uso e diferencas do produto logo no inicio.\n- Embalagem segura, prazo de envio e garantia destacados.\n- Beneficios reais para o cliente em frases curtas, fortes e escaneaveis.\nPalavras-chave fortes: agenda, planner, premium, personalizada, feminina.\nFinalize com uma chamada objetiva para compra, personalizacao e decisao imediata.");
+            ->assertJsonPath('analysis.suggested_title', 'Agenda personalizada capa dura Planner Premium Feminina')
+            ->assertJsonPath('analysis.suggested_description', "Agenda personalizada capa dura criado para disputar o topo da busca e converter com mais confianca.\nDestaques principais:\n- Material, acabamento e beneficio principal explicados com clareza logo no inicio.\n- Medidas, modo de uso e diferenciais reais organizados em leitura rapida.\n- Embalagem segura, prazo de envio e garantia destacados para reduzir duvida.\n- Beneficios reais para o cliente em frases curtas, fortes e escaneaveis.\nPalavras-chave fortes: agenda, planner, premium, personalizada, feminina.\nFinalize com uma chamada objetiva para compra, personalizacao e decisao imediata.");
     }
 
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
