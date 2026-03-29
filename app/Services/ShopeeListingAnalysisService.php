@@ -27,7 +27,6 @@ final class ShopeeListingAnalysisService
                 'my_score' => $mineScores['total'],
                 'gap' => max(0, $competitorScores['total'] - $mineScores['total']),
             ],
-            'radar' => $this->radarRows($competitor, $mine, $competitorScores, $mineScores),
             'categories' => [
                 ['id' => 'media', 'label' => 'Visual do anuncio', 'competitor' => $competitorScores['media'], 'mine' => $mineScores['media']],
                 ['id' => 'title', 'label' => 'Titulo', 'competitor' => $competitorScores['title'], 'mine' => $mineScores['title']],
@@ -39,6 +38,7 @@ final class ShopeeListingAnalysisService
             'comparisons' => $this->comparisonRows($competitor, $mine, $competitorScores, $mineScores),
             'actions' => $this->actionItems($competitor, $mine, $mineScores),
             'suggested_title' => $this->suggestedTitle($competitor, $mine),
+            'suggested_description' => $this->suggestedDescription($competitor, $mine),
         ];
 
         return $this->enhanceWithOpenAi($analysis);
@@ -145,6 +145,7 @@ final class ShopeeListingAnalysisService
             $meta['og:title'] ?? null,
             $meta['twitter:title'] ?? null,
             is_string($primaryJson['name'] ?? null) ? $primaryJson['name'] : null,
+            $this->extractJsonStringField($html, 'name'),
             $this->extractTitleTag($html),
             $urlTitle,
         ]);
@@ -153,6 +154,7 @@ final class ShopeeListingAnalysisService
             $meta['og:description'] ?? null,
             $meta['description'] ?? null,
             is_string($primaryJson['description'] ?? null) ? $primaryJson['description'] : null,
+            $this->extractJsonStringField($html, 'description'),
             $urlTitle,
         ]);
 
@@ -160,9 +162,10 @@ final class ShopeeListingAnalysisService
             $meta['product:price:amount'] ?? null,
             data_get($primaryJson, 'offers.price'),
             $this->extractFirstMatch('/"price"\s*:\s*"?(\d+[.,]?\d*)"?/i', $html),
+            $this->extractFirstMatch('/R\$\s*([\d.,]+)/iu', $html),
         ]);
 
-        $images = $this->extractImages($jsonLd, $meta);
+        $images = $this->extractImages($jsonLd, $meta, $html);
         $rating = $this->firstNumeric([
             data_get($primaryJson, 'aggregateRating.ratingValue'),
             $this->extractFirstMatch('/"ratingValue"\s*:\s*"?(\d+[.,]?\d*)"?/i', $html),
@@ -382,50 +385,54 @@ final class ShopeeListingAnalysisService
         return $actions;
     }
 
-    private function radarRows(array $competitor, array $mine, array $competitorScores, array $mineScores): array
-    {
-        return [
-            [
-                'id' => 'price',
-                'label' => 'Preco',
-                'competitor' => $this->priceRadarScore((float) ($competitor['price'] ?? 0), (float) ($competitor['price'] ?? 0)),
-                'mine' => $this->priceRadarScore((float) ($mine['price'] ?? 0), (float) ($competitor['price'] ?? 0)),
-            ],
-            [
-                'id' => 'seo',
-                'label' => 'SEO',
-                'competitor' => (int) round(($competitorScores['title'] + $competitorScores['keywords']) / 2),
-                'mine' => (int) round(($mineScores['title'] + $mineScores['keywords']) / 2),
-            ],
-            [
-                'id' => 'photos',
-                'label' => 'Fotos',
-                'competitor' => $competitorScores['media'],
-                'mine' => $mineScores['media'],
-            ],
-            [
-                'id' => 'relevance',
-                'label' => 'Relevancia',
-                'competitor' => (int) round(($competitorScores['keywords'] + $competitorScores['description'] + $competitorScores['offer']) / 3),
-                'mine' => (int) round(($mineScores['keywords'] + $mineScores['description'] + $mineScores['offer']) / 3),
-            ],
-            [
-                'id' => 'service',
-                'label' => 'Atendimento',
-                'competitor' => $competitorScores['social'],
-                'mine' => $mineScores['social'],
-            ],
-        ];
-    }
-
     private function suggestedTitle(array $competitor, array $mine): string
     {
+        $baseTitle = $this->firstFilled([
+            $mine['title'] ?? null,
+            $competitor['title'] ?? null,
+        ]);
         $keywords = array_values(array_unique(array_merge(
-            array_slice($competitor['keywords'] ?? [], 0, 5),
-            array_slice($mine['keywords'] ?? [], 0, 3)
+            array_slice($competitor['keywords'] ?? [], 0, 6),
+            array_slice($mine['keywords'] ?? [], 0, 4)
         )));
 
-        return ucfirst(trim(implode(' ', array_slice($keywords, 0, 8))));
+        $tokens = array_values(array_unique(array_filter(array_merge(
+            $this->keywordsFor($baseTitle),
+            $keywords
+        ))));
+
+        $suggestion = ucfirst(trim(implode(' ', array_slice($tokens, 0, 10))));
+
+        return mb_strlen($suggestion) >= 35 ? $suggestion : ucfirst(trim($baseTitle));
+    }
+
+    private function suggestedDescription(array $competitor, array $mine): string
+    {
+        $productName = $this->firstFilled([
+            $mine['title'] ?? null,
+            $competitor['title'] ?? null,
+            'Produto personalizado',
+        ]);
+
+        $topKeywords = array_slice(array_values(array_unique(array_merge(
+            $competitor['keywords'] ?? [],
+            $mine['keywords'] ?? []
+        ))), 0, 5);
+
+        $keywordLine = $topKeywords !== []
+            ? 'Palavras-chave fortes: ' . implode(', ', $topKeywords) . '.'
+            : 'Destaque o termo principal do produto logo no inicio.';
+
+        return trim(implode("\n", [
+            $productName . ' pensado para chamar atencao na busca e converter melhor.',
+            'Destaques principais:',
+            '- Material e acabamento explicados com clareza.',
+            '- Medidas, uso e diferencas do produto logo no inicio.',
+            '- Embalagem segura, prazo de envio e garantia destacados.',
+            '- Beneficios reais para o cliente em frases curtas, fortes e escaneaveis.',
+            $keywordLine,
+            'Finalize com uma chamada objetiva para compra, personalizacao e decisao imediata.',
+        ]));
     }
 
     private function extractMetaTags(string $html): array
@@ -490,7 +497,7 @@ final class ShopeeListingAnalysisService
         return trim(html_entity_decode(strip_tags($matches[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
     }
 
-    private function extractImages(array $jsonLd, array $meta): array
+    private function extractImages(array $jsonLd, array $meta, string $html): array
     {
         $images = [];
 
@@ -517,7 +524,35 @@ final class ShopeeListingAnalysisService
             $images[] = (string) $meta['og:image'];
         }
 
+        foreach (['twitter:image', 'twitter:image:src'] as $metaKey) {
+            if (!empty($meta[$metaKey])) {
+                $images[] = (string) $meta[$metaKey];
+            }
+        }
+
+        $images = array_merge($images, $this->extractImageUrlsFromHtml($html));
+        $images = array_merge($images, $this->extractImageUrlsFromHtml(json_encode($jsonLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: ''));
+
         return array_values(array_unique(array_filter($images)));
+    }
+
+    private function extractImageUrlsFromHtml(string $html): array
+    {
+        preg_match_all('/https?:\/\/[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?/iu', $html, $matches);
+
+        return array_values(array_filter(array_map('trim', $matches[0] ?? [])));
+    }
+
+    private function extractJsonStringField(string $html, string $field): ?string
+    {
+        $pattern = '/"' . preg_quote($field, '/') . '"\s*:\s*"((?:[^"\\\\]|\\\\.)+)"/iu';
+        if (!preg_match($pattern, $html, $matches)) {
+            return null;
+        }
+
+        $decoded = stripcslashes((string) ($matches[1] ?? ''));
+
+        return trim(html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
     }
 
     private function scoreMedia(array $listing): int
@@ -694,37 +729,6 @@ final class ShopeeListingAnalysisService
         return $this->clamp($score);
     }
 
-    private function priceRadarScore(float $price, float $competitorPrice): int
-    {
-        if ($price <= 0) {
-            return 0;
-        }
-
-        if ($competitorPrice <= 0) {
-            return 60;
-        }
-
-        $delta = (($price - $competitorPrice) / $competitorPrice) * 100;
-
-        if ($delta <= 0) {
-            return 100;
-        }
-
-        if ($delta <= 5) {
-            return 78;
-        }
-
-        if ($delta <= 10) {
-            return 55;
-        }
-
-        if ($delta <= 15) {
-            return 32;
-        }
-
-        return 14;
-    }
-
     private function keywordsFor(string $text): array
     {
         $normalized = preg_replace('/[^\p{L}\p{N}]+/u', ' ', mb_strtolower($this->stripAccents($text))) ?: '';
@@ -880,6 +884,7 @@ final class ShopeeListingAnalysisService
                                         'Cada bloco deve ter title, tone, result e suggestion.',
                                         'Preencha actions com 3 a 6 cards curtos.',
                                         'Gere suggested_title melhor que o atual se houver dados suficientes.',
+                                        'Gere suggested_description forte, mais convincente e mais clara que a descricao atual.',
                                         'Se algum dado estiver ausente, explique a limitacao sem inventar.',
                                     ],
                                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -923,6 +928,10 @@ final class ShopeeListingAnalysisService
 
             if (!empty($parsed['suggested_title']) && is_string($parsed['suggested_title'])) {
                 $analysis['suggested_title'] = trim($parsed['suggested_title']);
+            }
+
+            if (!empty($parsed['suggested_description']) && is_string($parsed['suggested_description'])) {
+                $analysis['suggested_description'] = trim($parsed['suggested_description']);
             }
 
             if (isset($parsed['summary_note']) && is_string($parsed['summary_note'])) {
@@ -969,6 +978,9 @@ final class ShopeeListingAnalysisService
                 'suggested_title' => [
                     'type' => 'string',
                 ],
+                'suggested_description' => [
+                    'type' => 'string',
+                ],
                 'diagnosis' => [
                     'type' => 'array',
                     'items' => [
@@ -1004,7 +1016,7 @@ final class ShopeeListingAnalysisService
                     ],
                 ],
             ],
-            'required' => ['summary_note', 'suggested_title', 'diagnosis', 'actions'],
+            'required' => ['summary_note', 'suggested_title', 'suggested_description', 'diagnosis', 'actions'],
         ];
     }
 }
