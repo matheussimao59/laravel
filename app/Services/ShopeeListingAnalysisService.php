@@ -106,9 +106,11 @@ final class ShopeeListingAnalysisService
             'host' => parse_url($url, PHP_URL_HOST) ?: '',
             'title' => $this->firstFilled([
                 $decoded['title'] ?? null,
+                $this->titleFromUrl($url),
             ]),
             'description' => $this->firstFilled([
                 $decoded['description'] ?? null,
+                $this->titleFromUrl($url),
             ]),
             'price' => $this->toFloat($decoded['price'] ?? null),
             'photo_count' => max(0, (int) ($decoded['photo_count'] ?? 0)),
@@ -128,6 +130,7 @@ final class ShopeeListingAnalysisService
                     implode(' ', array_map('strval', $decoded['tags'] ?? []))
                 ))
             ),
+            'capture_source' => 'playwright',
         ];
     }
 
@@ -136,18 +139,21 @@ final class ShopeeListingAnalysisService
         $meta = $this->extractMetaTags($html);
         $jsonLd = $this->extractJsonLd($html);
         $primaryJson = $jsonLd[0] ?? [];
+        $urlTitle = $this->titleFromUrl($url);
 
         $title = $this->firstFilled([
             $meta['og:title'] ?? null,
             $meta['twitter:title'] ?? null,
             is_string($primaryJson['name'] ?? null) ? $primaryJson['name'] : null,
             $this->extractTitleTag($html),
+            $urlTitle,
         ]);
 
         $description = $this->firstFilled([
             $meta['og:description'] ?? null,
             $meta['description'] ?? null,
             is_string($primaryJson['description'] ?? null) ? $primaryJson['description'] : null,
+            $urlTitle,
         ]);
 
         $price = $this->firstNumeric([
@@ -189,6 +195,7 @@ final class ShopeeListingAnalysisService
             'rating' => $rating,
             'response_time_text' => $responseTimeText,
             'keywords' => $keywords,
+            'capture_source' => 'html',
         ];
     }
 
@@ -817,6 +824,27 @@ final class ShopeeListingAnalysisService
         $host = strtolower((string) parse_url($url, PHP_URL_HOST));
 
         return str_contains($host, 'shopee');
+    }
+
+    private function titleFromUrl(string $url): string
+    {
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        if ($path === '') {
+            return '';
+        }
+
+        $lastSegment = trim((string) last(array_filter(explode('/', $path))), '/');
+        if ($lastSegment === '') {
+            return '';
+        }
+
+        $decoded = urldecode($lastSegment);
+        $decoded = preg_replace('/-i\.\d+\.\d+.*$/i', '', $decoded) ?? $decoded;
+        $decoded = preg_replace('/[_-]+/', ' ', $decoded) ?? $decoded;
+        $decoded = preg_replace('/\s+/', ' ', $decoded) ?? $decoded;
+        $decoded = trim($decoded);
+
+        return mb_convert_case($decoded, MB_CASE_TITLE, 'UTF-8');
     }
 
     private function enhanceWithOpenAi(array $analysis): array
