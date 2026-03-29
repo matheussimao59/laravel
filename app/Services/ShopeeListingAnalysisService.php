@@ -6,6 +6,7 @@ use App\Support\ExternalServiceException;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Throwable;
 
 final class ShopeeListingAnalysisService
@@ -50,6 +51,11 @@ final class ShopeeListingAnalysisService
             throw new ExternalServiceException('Informe links validos da Shopee para comparar os anuncios.', 422);
         }
 
+        $playwrightListing = $this->fetchListingWithPlaywright($normalizedUrl);
+        if (is_array($playwrightListing)) {
+            return $playwrightListing;
+        }
+
         $response = Http::timeout(20)
             ->withHeaders([
                 'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
@@ -65,6 +71,64 @@ final class ShopeeListingAnalysisService
         }
 
         return $this->extractListingData($normalizedUrl, (string) $response->body());
+    }
+
+    private function fetchListingWithPlaywright(string $url): ?array
+    {
+        $scriptPath = base_path('scripts/shopee-listing-scrape.mjs');
+        $playwrightPackage = base_path('node_modules/playwright/package.json');
+
+        if (!is_file($scriptPath) || !is_file($playwrightPackage)) {
+            return null;
+        }
+
+        try {
+            $result = Process::timeout(35)->run([
+                'node',
+                $scriptPath,
+                $url,
+            ]);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (!$result->successful()) {
+            return null;
+        }
+
+        $decoded = json_decode(trim($result->output()), true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        return [
+            'url' => $url,
+            'host' => parse_url($url, PHP_URL_HOST) ?: '',
+            'title' => $this->firstFilled([
+                $decoded['title'] ?? null,
+            ]),
+            'description' => $this->firstFilled([
+                $decoded['description'] ?? null,
+            ]),
+            'price' => $this->toFloat($decoded['price'] ?? null),
+            'photo_count' => max(0, (int) ($decoded['photo_count'] ?? 0)),
+            'images' => array_values(array_filter(array_map('strval', $decoded['images'] ?? []))),
+            'has_video' => !empty($decoded['has_video']),
+            'free_shipping' => !empty($decoded['free_shipping']),
+            'sold_count' => $this->toFloat($decoded['sold_count'] ?? null),
+            'rating' => $this->toFloat($decoded['rating'] ?? null),
+            'response_time_text' => $this->firstFilled([
+                $decoded['response_time_text'] ?? null,
+            ]),
+            'keywords' => $this->keywordsFor(
+                trim(sprintf(
+                    '%s %s %s',
+                    (string) ($decoded['title'] ?? ''),
+                    (string) ($decoded['description'] ?? ''),
+                    implode(' ', array_map('strval', $decoded['tags'] ?? []))
+                ))
+            ),
+        ];
     }
 
     private function extractListingData(string $url, string $html): array
