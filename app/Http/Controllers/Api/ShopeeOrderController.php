@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\ShopeeListingAnalysisService;
+use App\Support\ExternalServiceException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -386,6 +388,47 @@ final class ShopeeOrderController
                 'products_created' => $productsCreated,
                 'products_updated' => 0,
             ],
+        ]);
+    }
+
+    public function analyzeListings(Request $request, ShopeeListingAnalysisService $service): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (!$this->isAdmin($user->role ?? null)) {
+            return response()->json(['message' => 'Acesso permitido apenas para admin.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'competitor_url' => ['required', 'url', 'max:1000'],
+            'my_url' => ['required', 'url', 'max:1000'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Informe os dois links da Shopee para comparar os anuncios.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            $analysis = $service->analyze(
+                (string) $request->input('competitor_url'),
+                (string) $request->input('my_url'),
+            );
+        } catch (ExternalServiceException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'details' => $exception->details(),
+            ], $exception->status());
+        }
+
+        return response()->json([
+            'message' => 'Analise do anuncio concluida com sucesso.',
+            'analysis' => $analysis,
         ]);
     }
 

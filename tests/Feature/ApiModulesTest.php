@@ -1031,6 +1031,113 @@ class ApiModulesTest extends TestCase
             ->assertJsonPath('chart.series.1.values.0', 125);
     }
 
+    public function test_admin_can_analyze_shopee_listings_from_only_two_links(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $competitorHtml = <<<'HTML'
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <title>Agenda Planner Premium Personalizada Feminina</title>
+  <meta property="og:title" content="Agenda Planner Premium Personalizada Feminina" />
+  <meta property="og:description" content="- Capa dura premium
+- 8 fotos no anuncio
+- Video mostrando acabamento
+- Frete gratis
+- Medidas, garantia e embalagem segura" />
+  <meta property="product:price:amount" content="59.90" />
+  <meta property="og:image" content="https://img.shopee.com.br/concorrente-1.jpg" />
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"Product",
+    "name":"Agenda Planner Premium Personalizada Feminina",
+    "description":"Agenda premium personalizada com capa dura, acabamento premium, medidas detalhadas e garantia.",
+    "image":[
+      "https://img.shopee.com.br/concorrente-1.jpg",
+      "https://img.shopee.com.br/concorrente-2.jpg",
+      "https://img.shopee.com.br/concorrente-3.jpg",
+      "https://img.shopee.com.br/concorrente-4.jpg",
+      "https://img.shopee.com.br/concorrente-5.jpg",
+      "https://img.shopee.com.br/concorrente-6.jpg"
+    ],
+    "offers":{"price":"59.90"},
+    "aggregateRating":{"ratingValue":"4.9","ratingCount":"320"}
+  }
+  </script>
+</head>
+<body>
+  frete gratis
+  video_url
+</body>
+</html>
+HTML;
+
+        $myHtml = <<<'HTML'
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <title>Agenda personalizada capa dura</title>
+  <meta property="og:title" content="Agenda personalizada capa dura" />
+  <meta property="og:description" content="Agenda personalizada simples para o dia a dia." />
+  <meta property="product:price:amount" content="74.90" />
+  <meta property="og:image" content="https://img.shopee.com.br/meu-anuncio.jpg" />
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"Product",
+    "name":"Agenda personalizada capa dura",
+    "description":"Agenda personalizada simples.",
+    "image":"https://img.shopee.com.br/meu-anuncio.jpg",
+    "offers":{"price":"74.90"},
+    "aggregateRating":{"ratingValue":"4.4","ratingCount":"18"}
+  }
+  </script>
+</head>
+<body>
+  sem frete gratis
+</body>
+</html>
+HTML;
+
+        Http::fake([
+            'https://shopee.com.br/concorrente*' => Http::response($competitorHtml, 200),
+            'https://shopee.com.br/meu-anuncio*' => Http::response($myHtml, 200),
+        ]);
+
+        $this->postJson('/api/shopee/analyze-listings', [
+            'competitor_url' => 'https://shopee.com.br/concorrente-topo',
+            'my_url' => 'https://shopee.com.br/meu-anuncio',
+        ])
+            ->assertOk()
+            ->assertJsonStructure([
+                'analysis' => [
+                    'summary' => ['competitor_score', 'my_score', 'gap'],
+                    'radar',
+                    'diagnosis',
+                    'comparisons',
+                    'actions',
+                    'suggested_title',
+                ],
+            ])
+            ->assertJsonPath('analysis.competitor.title', 'Agenda Planner Premium Personalizada Feminina')
+            ->assertJsonPath('analysis.mine.title', 'Agenda personalizada capa dura')
+            ->assertJsonPath('analysis.diagnosis.0.id', 'seo')
+            ->assertJsonPath('analysis.diagnosis.1.id', 'visual')
+            ->assertJsonPath('analysis.diagnosis.2.id', 'description')
+            ->assertJsonPath('analysis.diagnosis.3.id', 'social')
+            ->assertJsonPath('analysis.actions.0.title', 'Correcao urgente')
+            ->assertJsonPath('analysis.radar.0.id', 'price')
+            ->assertJsonPath('analysis.radar.4.id', 'service')
+            ->assertJsonPath('analysis.suggested_title', 'Agenda planner premium personalizada feminina capa');
+    }
+
     public function test_authenticated_user_can_exchange_ml_oauth_token_and_sync_orders(): void
     {
         $user = User::factory()->create([
