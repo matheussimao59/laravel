@@ -633,6 +633,8 @@ final class MercadoLivreService
 
     private function attachPaymentsToOrders(array &$orders, string $accessToken): void
     {
+        $paymentDetailsMap = [];
+
         foreach ($orders as &$order) {
             $orderId = (int) ($order['id'] ?? 0);
             if ($orderId <= 0) {
@@ -650,7 +652,11 @@ final class MercadoLivreService
 
             $details = [];
             foreach ($paymentIds as $paymentId) {
-                $detail = $this->fetchPaymentDetails($paymentId, $accessToken);
+                if (!array_key_exists($paymentId, $paymentDetailsMap)) {
+                    $paymentDetailsMap[$paymentId] = $this->fetchPaymentDetails($paymentId, $accessToken);
+                }
+
+                $detail = $paymentDetailsMap[$paymentId];
                 if ($detail !== null) {
                     $details[] = $detail;
                 }

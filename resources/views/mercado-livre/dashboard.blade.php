@@ -33,6 +33,11 @@
     <section class="card">
         <div class="card-content">
             <h3 class="panel-title">Produtos</h3>
+            @if($products->count() > 0)
+                <p class="panel-subtitle">
+                    Exibindo {{ $products->firstItem() }}-{{ $products->lastItem() }} de {{ $totalProducts }} produtos.
+                </p>
+            @endif
             <div class="table-wrap">
                 <table class="table">
                     <thead>
@@ -68,6 +73,19 @@
                     </tbody>
                 </table>
             </div>
+            @if($products->hasPages())
+                <div class="pagination-wrap">
+                    <div class="actions">
+                        @if($products->previousPageUrl())
+                            <a href="{{ $products->previousPageUrl() }}" class="btn btn-light">Pagina anterior</a>
+                        @endif
+                        <span class="muted">Pagina {{ $products->currentPage() }}</span>
+                        @if($products->nextPageUrl())
+                            <a href="{{ $products->nextPageUrl() }}" class="btn btn-light">Proxima pagina</a>
+                        @endif
+                    </div>
+                </div>
+            @endif
         </div>
     </section>
 

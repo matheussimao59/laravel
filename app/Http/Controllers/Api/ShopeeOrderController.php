@@ -105,32 +105,26 @@ final class ShopeeOrderController
             2
         );
 
+        $yearExpression = $this->datePartExpression('year', 'order_created_at');
+        $monthExpression = $this->datePartExpression('month', 'order_created_at');
+
         $filters = DB::table('shopee_order_reports')
             ->where('user_id', $user->id)
             ->whereNotNull('product_name')
             ->whereRaw("trim(product_name) <> ''")
             ->whereRaw("trim(product_name) <> '-'")
             ->whereNotNull('order_created_at')
-            ->orderByDesc('order_created_at')
-            ->get(['order_created_at'])
-            ->reduce(function (Collection $carry, object $row) {
-                $date = (string) ($row->order_created_at ?? '');
-                if (!preg_match('/^(\d{4})-(\d{2})-\d{2}$/', $date, $matches)) {
-                    return $carry;
-                }
-
-                $key = $matches[1] . '-' . $matches[2];
-                $item = $carry->get($key, [
-                    'year' => (int) $matches[1],
-                    'month' => (int) $matches[2],
-                    'total' => 0,
-                ]);
-                $item['total']++;
-                $carry->put($key, $item);
-
-                return $carry;
-            }, collect())
-            ->sortByDesc(fn (array $item) => sprintf('%04d-%02d', $item['year'], $item['month']))
+            ->selectRaw("{$yearExpression} as year")
+            ->selectRaw("{$monthExpression} as month")
+            ->selectRaw('count(*) as total')
+            ->groupByRaw("{$yearExpression}, {$monthExpression}")
+            ->orderByRaw("{$yearExpression} desc, {$monthExpression} desc")
+            ->get()
+            ->map(fn (object $row) => [
+                'year' => (int) ($row->year ?? 0),
+                'month' => (int) ($row->month ?? 0),
+                'total' => (int) ($row->total ?? 0),
+            ])
             ->values();
 
         $availableYears = $filters
@@ -616,7 +610,7 @@ final class ShopeeOrderController
 
         return DB::table('shopee_products')
             ->where('user_id', $userId)
-            ->get()
+            ->get(['id', 'product_name', 'original_price', 'production_cost', 'materials_json', 'created_at', 'updated_at'])
             ->mapWithKeys(function ($row) {
                 $normalized = $this->normalizeProductName((string) $row->product_name);
                 return [$normalized => $this->mapShopeeProduct($row)];
@@ -629,7 +623,7 @@ final class ShopeeOrderController
         return DB::table('shopee_products')
             ->where('user_id', $userId)
             ->orderBy('product_name')
-            ->get()
+            ->get(['id', 'product_name', 'original_price', 'production_cost', 'materials_json', 'created_at', 'updated_at'])
             ->map(fn ($row) => $this->mapShopeeProduct($row))
             ->values()
             ->all();
@@ -652,6 +646,25 @@ final class ShopeeOrderController
     {
         $normalized = preg_replace('/\s+/u', ' ', trim($value)) ?? '';
         return mb_strtolower($normalized, 'UTF-8');
+    }
+
+    private function datePartExpression(string $part, string $column): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'sqlite') {
+            return match ($part) {
+                'year' => "cast(strftime('%Y', {$column}) as integer)",
+                'month' => "cast(strftime('%m', {$column}) as integer)",
+                default => $column,
+            };
+        }
+
+        return match ($part) {
+            'year' => "year({$column})",
+            'month' => "month({$column})",
+            default => $column,
+        };
     }
 
     private function decodeJson(mixed $value): mixed

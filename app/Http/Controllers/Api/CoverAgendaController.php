@@ -13,6 +13,11 @@ use Illuminate\Support\Str;
 
 final class CoverAgendaController
 {
+    /**
+     * @var array{front: string, back: string}|null
+     */
+    private ?array $imageColumns = null;
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -23,6 +28,7 @@ final class CoverAgendaController
         $includeImages = $request->boolean('include_images', true);
         $limit = max(1, min(500, (int) $request->input('limit', 120)));
         $offset = max(0, (int) $request->input('offset', 0));
+        $columns = $this->resolveImageColumns();
 
         $query = DB::table('cover_agenda_items')->where('user_id', $user->id);
         if ($request->has('printed')) {
@@ -31,6 +37,20 @@ final class CoverAgendaController
 
         $total = (clone $query)->count();
         $rows = $query
+            ->select([
+                'id',
+                'user_id',
+                'order_id',
+                'printed',
+                'printed_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->when($includeImages, function ($builder) use ($columns) {
+                $builder->addSelect([$columns['front'], $columns['back']]);
+            })
+            ->selectRaw("case when {$columns['front']} is null or {$columns['front']} = '' then 0 else 1 end as has_front_image")
+            ->selectRaw("case when {$columns['back']} is null or {$columns['back']} = '' then 0 else 1 end as has_back_image")
             ->orderByDesc('updated_at')
             ->offset($offset)
             ->limit($limit)
@@ -207,8 +227,8 @@ final class CoverAgendaController
             'order_id' => $row->order_id,
             'front_image' => $includeImages ? ($row->{$columns['front']} ?? null) : null,
             'back_image' => $includeImages ? ($row->{$columns['back']} ?? null) : null,
-            'has_front_image' => !empty($row->{$columns['front']} ?? null),
-            'has_back_image' => !empty($row->{$columns['back']} ?? null),
+            'has_front_image' => isset($row->has_front_image) ? (bool) $row->has_front_image : !empty($row->{$columns['front']} ?? null),
+            'has_back_image' => isset($row->has_back_image) ? (bool) $row->has_back_image : !empty($row->{$columns['back']} ?? null),
             'printed' => (bool) $row->printed,
             'printed_at' => $row->printed_at,
             'created_at' => $row->created_at,
@@ -221,11 +241,15 @@ final class CoverAgendaController
      */
     private function resolveImageColumns(): array
     {
-        if (Schema::hasColumn('cover_agenda_items', 'front_image') && Schema::hasColumn('cover_agenda_items', 'back_image')) {
-            return ['front' => 'front_image', 'back' => 'back_image'];
+        if ($this->imageColumns !== null) {
+            return $this->imageColumns;
         }
 
-        return ['front' => 'front_image_path', 'back' => 'back_image_path'];
+        if (Schema::hasColumn('cover_agenda_items', 'front_image') && Schema::hasColumn('cover_agenda_items', 'back_image')) {
+            return $this->imageColumns = ['front' => 'front_image', 'back' => 'back_image'];
+        }
+
+        return $this->imageColumns = ['front' => 'front_image_path', 'back' => 'back_image_path'];
     }
 
     /**

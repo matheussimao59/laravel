@@ -100,6 +100,11 @@
             font-size: clamp(1.8rem, 2vw, 2.4rem);
         }
         .panel-title { margin: 0 0 12px; font-size: 1.15rem; }
+        .panel-subtitle {
+            margin: -4px 0 14px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
         .table-wrap { overflow-x: auto; }
         .table { width: 100%; border-collapse: collapse; background: #fff; }
         .table th, .table td {
@@ -172,6 +177,11 @@
         .badge-warning { background: #fff7ed; color: var(--warning); }
         .list { margin: 0; padding-left: 18px; color: #334155; }
         .list li + li { margin-top: 8px; }
+        .pagination-wrap {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid #e5edf6;
+        }
         .stack { display: grid; gap: 16px; }
         .muted { color: var(--muted); }
         @media (max-width: 900px) {

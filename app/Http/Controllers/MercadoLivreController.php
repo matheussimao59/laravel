@@ -13,12 +13,44 @@ class MercadoLivreController extends Controller
     public function dashboard()
     {
         $user = Auth::user();
-        $products = MercadoLivreProduct::where('user_id', $user->id)->get();
-        $totalProducts = $products->count();
-        $autoRepriceCount = $products->where('auto_reprice', true)->count();
-        $recentChanges = PriceHistory::with('mercadoLivreProduct')
-            ->whereHas('mercadoLivreProduct', fn($q) => $q->where('user_id', $user->id))
-            ->latest()
+
+        $productsQuery = MercadoLivreProduct::query()
+            ->where('user_id', $user->id);
+
+        $totalProducts = (clone $productsQuery)->count();
+        $autoRepriceCount = (clone $productsQuery)
+            ->where('auto_reprice', true)
+            ->count();
+
+        $products = (clone $productsQuery)
+            ->select([
+                'id',
+                'user_id',
+                'title',
+                'current_price',
+                'cost_price',
+                'min_margin',
+                'shipping_cost',
+                'taxes',
+                'auto_reprice',
+                'updated_at',
+            ])
+            ->orderByDesc('updated_at')
+            ->simplePaginate(25);
+
+        $recentChanges = PriceHistory::query()
+            ->select([
+                'id',
+                'mercado_livre_product_id',
+                'old_price',
+                'new_price',
+                'reason',
+                'created_at',
+            ])
+            ->join('mercado_livre_products', 'mercado_livre_products.id', '=', 'price_histories.mercado_livre_product_id')
+            ->with('mercadoLivreProduct:id,user_id,title')
+            ->where('mercado_livre_products.user_id', $user->id)
+            ->latest('price_histories.created_at')
             ->take(10)
             ->get();
 
@@ -41,7 +73,7 @@ class MercadoLivreController extends Controller
         ]);
 
         $user = Auth::user();
-        $accessToken = $user->mercado_livre_access_token ?? null;
+        $accessToken = $user->mercadoLivreAccount?->access_token;
 
         if ($accessToken) {
             $competitors = $mlService->fetchCompetitorPrices($request->item_id, $accessToken);
