@@ -2,8 +2,39 @@
 
 @section('title', 'Mercado Livre')
 
+@push('styles')
+<style>
+    .mercado-livre-dashboard .grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .mercado-livre-dashboard .card {
+        border-radius: 14px;
+    }
+
+    .mercado-livre-dashboard .inline-form {
+        gap: 6px;
+    }
+
+    .mercado-livre-dashboard .inline-form .form-control {
+        width: 120px;
+    }
+
+    .mercado-livre-dashboard .table td,
+    .mercado-livre-dashboard .table th {
+        white-space: nowrap;
+    }
+
+    .mercado-livre-dashboard .table td:first-child,
+    .mercado-livre-dashboard .table th:first-child {
+        width: 100%;
+        white-space: normal;
+    }
+</style>
+@endpush
+
 @section('content')
-<div class="container">
+<div class="container mercado-livre-dashboard">
     <div class="page-head">
         <h1>Dashboard Mercado Livre</h1>
         <p>Modulo atual de repricing e gestao de produtos do Mercado Livre.</p>

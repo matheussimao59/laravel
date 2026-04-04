@@ -39,6 +39,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('financial/categories', FinancialController::class)->parameter('categories', 'category');
     Route::post('/financial/accounts', [FinancialController::class, 'storeAccount']);
     Route::post('/financial/transactions', [FinancialController::class, 'storeTransaction']);
+    Route::patch('/financial/transactions/{transaction}', [FinancialController::class, 'updateTransaction']);
+    Route::delete('/financial/transactions/{transaction}', [FinancialController::class, 'destroyTransaction']);
 
     Route::get('/shipping/orders', [ShippingOrderController::class, 'index']);
     Route::post('/shipping/orders/import', [ShippingOrderController::class, 'import']);

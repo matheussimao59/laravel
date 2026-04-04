@@ -9,6 +9,49 @@ use Illuminate\Support\Facades\Validator;
 
 final class FinancialController
 {
+    private function formatTransaction(object $row): array
+    {
+        return [
+            'id' => (string) $row->id,
+            'user_id' => (string) $row->user_id,
+            'category_id' => $row->category_id ? (string) $row->category_id : null,
+            'account_id' => $row->account_id ? (string) $row->account_id : null,
+            'entry_type' => $row->type,
+            'status' => $row->status,
+            'description' => $row->title ?: ($row->description ?: ''),
+            'amount' => (float) $row->amount,
+            'due_date' => $row->due_date,
+            'paid_date' => $row->paid_at ? date('Y-m-d', strtotime((string) $row->paid_at)) : null,
+            'notes' => $row->description,
+            'receipt_image_data' => null,
+            'receipt_image_name' => $row->receipt_path ? basename((string) $row->receipt_path) : null,
+            'invoice_image_data' => null,
+            'invoice_image_name' => $row->invoice_path ? basename((string) $row->invoice_path) : null,
+            'created_at' => $row->created_at,
+        ];
+    }
+
+    private function recalculateAccountsForUser(int $userId): void
+    {
+        $accounts = DB::table('financial_accounts')->where('user_id', $userId)->get();
+
+        foreach ($accounts as $account) {
+            $balance = DB::table('financial_transactions')
+                ->where('user_id', $userId)
+                ->where('account_id', $account->id)
+                ->where('status', 'paid')
+                ->selectRaw("COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) as balance")
+                ->value('balance');
+
+            DB::table('financial_accounts')
+                ->where('id', $account->id)
+                ->update([
+                    'current_balance' => (float) $balance,
+                    'updated_at' => now(),
+                ]);
+        }
+    }
+
     public function dashboard(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -52,24 +95,7 @@ final class FinancialController
             ->orderBy('due_date')
             ->limit(3000)
             ->get()
-            ->map(fn ($row) => [
-                'id' => (string) $row->id,
-                'user_id' => (string) $row->user_id,
-                'category_id' => $row->category_id ? (string) $row->category_id : null,
-                'account_id' => $row->account_id ? (string) $row->account_id : null,
-                'entry_type' => $row->type,
-                'status' => $row->status,
-                'description' => $row->title ?: ($row->description ?: ''),
-                'amount' => (float) $row->amount,
-                'due_date' => $row->due_date,
-                'paid_date' => $row->paid_at ? date('Y-m-d', strtotime((string) $row->paid_at)) : null,
-                'notes' => $row->description,
-                'receipt_image_data' => null,
-                'receipt_image_name' => $row->receipt_path ? basename((string) $row->receipt_path) : null,
-                'invoice_image_data' => null,
-                'invoice_image_name' => $row->invoice_path ? basename((string) $row->invoice_path) : null,
-                'created_at' => $row->created_at,
-            ])
+            ->map(fn ($row) => $this->formatTransaction($row))
             ->values();
 
         return response()->json([
@@ -275,22 +301,96 @@ final class FinancialController
             'updated_at' => now(),
         ]);
 
-        if ($status === 'paid' && $accountId) {
-            $account = DB::table('financial_accounts')->where('id', (int) $accountId)->where('user_id', $user->id)->first();
-            if ($account) {
-                $delta = $entryType === 'income' ? $amount : -$amount;
-                DB::table('financial_accounts')
-                    ->where('id', (int) $accountId)
-                    ->update([
-                        'current_balance' => ((float) $account->current_balance) + $delta,
-                        'updated_at' => now(),
-                    ]);
-            }
-        }
+        $this->recalculateAccountsForUser((int) $user->id);
+
+        $transactionRow = DB::table('financial_transactions')->where('id', $id)->first();
 
         return response()->json([
             'message' => 'Lancamento criado com sucesso.',
             'transaction_id' => (string) $id,
+            'transaction' => $transactionRow ? $this->formatTransaction($transactionRow) : null,
         ], 201);
+    }
+
+    public function updateTransaction(Request $request, string $transaction): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $id = (int) $transaction;
+        $current = DB::table('financial_transactions')->where('id', $id)->where('user_id', $user->id)->first();
+        if (!$current) {
+            return response()->json(['message' => 'Lancamento nao encontrado.'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'category_id' => ['nullable', 'integer'],
+            'account_id' => ['nullable', 'integer'],
+            'entry_type' => ['required', 'in:income,expense'],
+            'status' => ['required', 'in:pending,paid'],
+            'description' => ['required', 'string', 'max:160'],
+            'amount' => ['required', 'numeric', 'min:0.01'],
+            'due_date' => ['nullable', 'date'],
+            'paid_date' => ['nullable', 'date'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Dados invalidos para lancamento.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        DB::table('financial_transactions')
+            ->where('id', $id)
+            ->where('user_id', $user->id)
+            ->update([
+                'account_id' => $request->input('account_id') ?: null,
+                'category_id' => $request->input('category_id') ?: null,
+                'type' => $request->string('entry_type')->toString(),
+                'title' => $request->string('description')->toString(),
+                'description' => $request->input('notes'),
+                'amount' => (float) $request->input('amount'),
+                'due_date' => $request->input('due_date'),
+                'paid_at' => $request->string('status')->toString() === 'paid' && $request->filled('paid_date')
+                    ? $request->input('paid_date') . ' 00:00:00'
+                    : null,
+                'status' => $request->string('status')->toString(),
+                'updated_at' => now(),
+            ]);
+
+        $this->recalculateAccountsForUser((int) $user->id);
+
+        $transactionRow = DB::table('financial_transactions')->where('id', $id)->first();
+
+        return response()->json([
+            'message' => 'Lancamento atualizado com sucesso.',
+            'transaction_id' => (string) $id,
+            'transaction' => $transactionRow ? $this->formatTransaction($transactionRow) : null,
+        ]);
+    }
+
+    public function destroyTransaction(Request $request, string $transaction): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $id = (int) $transaction;
+        $exists = DB::table('financial_transactions')->where('id', $id)->where('user_id', $user->id)->exists();
+        if (!$exists) {
+            return response()->json(['message' => 'Lancamento nao encontrado.'], 404);
+        }
+
+        DB::table('financial_transactions')->where('id', $id)->where('user_id', $user->id)->delete();
+        $this->recalculateAccountsForUser((int) $user->id);
+
+        return response()->json([
+            'message' => 'Lancamento excluido com sucesso.',
+            'transaction_id' => (string) $id,
+        ]);
     }
 }
