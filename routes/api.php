@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\MercadoLivreConfigController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
+use App\Http\Controllers\Api\ProductMatrixController;
 use App\Http\Controllers\Api\ShippingOrderController;
 use App\Http\Controllers\Api\ShopeeOrderController;
 use App\Http\Controllers\Api\FiscalProviderController;
@@ -64,6 +65,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('pricing/materials', PricingMaterialController::class)->parameter('materials', 'material');
     Route::apiResource('pricing/products', PricingProductController::class)->parameter('products', 'product');
+    Route::apiResource('product-matrices', ProductMatrixController::class)->parameter('product-matrices', 'matrix');
     Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order');
 
     Route::get('/fiscal/settings', [FiscalSettingController::class, 'show']);
