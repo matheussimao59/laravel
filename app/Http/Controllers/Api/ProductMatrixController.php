@@ -169,6 +169,8 @@ final class ProductMatrixController
             'fields.*.fontSize' => ['required_with:fields', 'numeric', 'min:1', 'max:50'],
             'fields.*.fontWeight' => ['required_with:fields', 'numeric', 'min:100', 'max:900'],
             'fields.*.align' => ['required_with:fields', 'in:left,center,right'],
+            'fields.*.fontFamily' => ['nullable', 'string', 'max:120'],
+            'fields.*.effect' => ['nullable', 'string', 'max:40'],
             'fields.*.textColor' => ['nullable', 'string', 'max:20'],
             'fields.*.strokeColor' => ['nullable', 'string', 'max:20'],
             'fields.*.strokeWidth' => ['nullable', 'numeric', 'min:0', 'max:8'],
