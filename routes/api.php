@@ -80,6 +80,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/modelos', [ModeloController::class, 'store']);
     Route::get('/modelos/{modelo}', [ModeloController::class, 'show']);
     Route::put('/modelos/{modelo}', [ModeloController::class, 'update']);
+    Route::delete('/modelos/{modelo}', [ModeloController::class, 'destroy']);
 
     Route::prefix('integrations/mercado-livre')->group(function () {
         Route::get('/config', [MercadoLivreConfigController::class, 'show']);

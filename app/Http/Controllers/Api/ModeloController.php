@@ -37,7 +37,7 @@ final class ModeloController
             'name' => ['required', 'string', 'max:255'],
             'sheet_size' => ['required', 'string', 'max:50'],
             'orientation' => ['required', 'string', 'max:50'],
-            'pdf_base' => ['required', 'file', 'mimetypes:application/pdf,image/jpeg,image/png,image/jpg,image/pjpeg', 'max:20480'],
+            'pdf_base' => ['required', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
         ]);
 
         $pdfPath = null;
@@ -108,6 +108,22 @@ final class ModeloController
             'message' => 'Modelo atualizado com sucesso.',
             'model' => $updated ? $this->mapRow($updated) : null,
         ]);
+    }
+
+    public function destroy(Request $request, $modelo): JsonResponse
+    {
+        $row = $this->getModelForUser($request, $modelo);
+        if (!$row) {
+            return response()->json(['message' => 'Modelo nao encontrado.'], 404);
+        }
+
+        if ($row->pdf_path) {
+            Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->pdf_path));
+        }
+
+        DB::table('modelos')->where('id', $modelo)->delete();
+
+        return response()->json(['message' => 'Modelo excluido com sucesso.']);
     }
 
     private function getModelForUser(Request $request, $modelo)
