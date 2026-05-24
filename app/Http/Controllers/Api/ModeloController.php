@@ -37,7 +37,7 @@ final class ModeloController
             'name' => ['required', 'string', 'max:255'],
             'sheet_size' => ['required', 'string', 'max:50'],
             'orientation' => ['required', 'string', 'max:50'],
-            'pdf_base' => ['required', 'file', 'mimes:pdf', 'max:5120'],
+            'pdf_base' => ['required', 'file', 'mimetypes:application/pdf,image/jpeg,image/png,image/jpg,image/pjpeg', 'max:5120'],
         ]);
 
         $pdfPath = null;
@@ -46,7 +46,7 @@ final class ModeloController
         if ($request->hasFile('pdf_base')) {
             $pdfFile = $request->file('pdf_base');
             $pdfName = $pdfFile->getClientOriginalName();
-            $pdfPath = $pdfFile->store('public/modelos');
+            $pdfPath = $pdfFile->store('modelos', 'public');
         }
 
         $id = DB::table('modelos')->insertGetId([
@@ -131,9 +131,16 @@ final class ModeloController
             'sheet_size' => (string) $row->sheet_size,
             'orientation' => (string) $row->orientation,
             'pdf_name' => $row->pdf_name ? (string) $row->pdf_name : null,
-            'pdf_url' => $row->pdf_path ? Storage::url($row->pdf_path) : null,
+            'pdf_url' => $row->pdf_path ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->pdf_path)) : null,
             'editor_state' => $row->editor_state ? json_decode($row->editor_state, true) : null,
             'created_at' => $row->created_at,
         ];
     }
 }
+
+
+
+
+
+
+
