@@ -37,7 +37,7 @@ final class ModeloController
             'name' => ['required', 'string', 'max:255'],
             'sheet_size' => ['required', 'string', 'max:50'],
             'orientation' => ['required', 'string', 'max:50'],
-            'pdf_base' => ['required', 'file', 'mimetypes:application/pdf,image/jpeg,image/png,image/jpg,image/pjpeg', 'max:5120'],
+            'pdf_base' => ['required', 'file', 'mimetypes:application/pdf,image/jpeg,image/png,image/jpg,image/pjpeg', 'max:20480'],
         ]);
 
         $pdfPath = null;
