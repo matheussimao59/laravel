@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -66,8 +67,8 @@ final class ManualPrintOrderController
             'values' => json_encode($request->input('values', [])),
             'quantity' => (int) $request->input('quantity', 1),
             'status' => $request->input('status', 'Dados Pendente'),
-            'saved_at' => $request->input('saved_at'),
-            'printed_at' => $request->input('printed_at'),
+            'saved_at' => $this->normalizeTimestamp($request->input('saved_at')),
+            'printed_at' => $this->normalizeTimestamp($request->input('printed_at')),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -111,8 +112,8 @@ final class ManualPrintOrderController
             'values' => $request->has('values') ? json_encode($request->input('values', [])) : $row->values,
             'quantity' => $request->has('quantity') ? (int) $request->input('quantity') : (int) $row->quantity,
             'status' => $request->has('status') ? $request->input('status') : $row->status,
-            'saved_at' => $request->exists('saved_at') ? $request->input('saved_at') : $row->saved_at,
-            'printed_at' => $request->exists('printed_at') ? $request->input('printed_at') : $row->printed_at,
+            'saved_at' => $request->exists('saved_at') ? $this->normalizeTimestamp($request->input('saved_at')) : $row->saved_at,
+            'printed_at' => $request->exists('printed_at') ? $this->normalizeTimestamp($request->input('printed_at')) : $row->printed_at,
             'updated_at' => now(),
         ]);
 
@@ -155,6 +156,15 @@ final class ManualPrintOrderController
             ->where('id', $modelId)
             ->where('user_id', $userId)
             ->exists();
+    }
+
+    private function normalizeTimestamp(mixed $value): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        return Carbon::parse($value)->format('Y-m-d H:i:s');
     }
 
     private function mapRow(object $row): array
