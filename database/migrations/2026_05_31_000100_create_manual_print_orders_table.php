@@ -12,6 +12,7 @@ return new class() extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('modelo_id')->nullable()->constrained('modelos')->nullOnDelete();
+            $table->string('platform_order_id', 120)->nullable();
             $table->json('values')->nullable();
             $table->unsignedInteger('quantity')->default(1);
             $table->string('status', 80)->default('Dados Pendente');
@@ -20,6 +21,7 @@ return new class() extends Migration
             $table->timestamps();
 
             $table->index(['user_id', 'status'], 'manual_print_orders_user_status_idx');
+            $table->index(['user_id', 'platform_order_id'], 'manual_print_orders_user_platform_idx');
             $table->index(['user_id', 'created_at'], 'manual_print_orders_user_created_idx');
         });
     }

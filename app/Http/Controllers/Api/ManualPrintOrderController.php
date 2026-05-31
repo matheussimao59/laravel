@@ -45,6 +45,7 @@ final class ManualPrintOrderController
 
         $validator = Validator::make($request->all(), [
             'model_id' => ['nullable', 'integer', 'exists:modelos,id'],
+            'platform_order_id' => ['nullable', 'string', 'max:120'],
             'values' => ['nullable', 'array'],
             'quantity' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'status' => ['nullable', 'string', 'in:' . implode(',', self::STATUSES)],
@@ -64,6 +65,7 @@ final class ManualPrintOrderController
         $id = DB::table('manual_print_orders')->insertGetId([
             'user_id' => $user->id,
             'modelo_id' => $modelId ? (int) $modelId : null,
+            'platform_order_id' => $request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null,
             'values' => json_encode($request->input('values', [])),
             'quantity' => (int) $request->input('quantity', 1),
             'status' => $request->input('status', 'Dados Pendente'),
@@ -90,6 +92,7 @@ final class ManualPrintOrderController
 
         $validator = Validator::make($request->all(), [
             'model_id' => ['sometimes', 'nullable', 'integer', 'exists:modelos,id'],
+            'platform_order_id' => ['sometimes', 'nullable', 'string', 'max:120'],
             'values' => ['sometimes', 'array'],
             'quantity' => ['sometimes', 'integer', 'min:1', 'max:9999'],
             'status' => ['sometimes', 'string', 'in:' . implode(',', self::STATUSES)],
@@ -109,6 +112,7 @@ final class ManualPrintOrderController
 
         DB::table('manual_print_orders')->where('id', (int) $order)->update([
             'modelo_id' => $modelId ? (int) $modelId : null,
+            'platform_order_id' => $request->has('platform_order_id') ? ($request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null) : $row->platform_order_id,
             'values' => $request->has('values') ? json_encode($request->input('values', [])) : $row->values,
             'quantity' => $request->has('quantity') ? (int) $request->input('quantity') : (int) $row->quantity,
             'status' => $request->has('status') ? $request->input('status') : $row->status,
@@ -171,6 +175,7 @@ final class ManualPrintOrderController
     {
         return [
             'id' => (string) $row->id,
+            'platformOrderId' => $row->platform_order_id ? (string) $row->platform_order_id : null,
             'modelId' => $row->modelo_id ? (string) $row->modelo_id : null,
             'values' => $row->values ? json_decode($row->values, true) : [],
             'quantity' => (int) ($row->quantity ?? 1),
