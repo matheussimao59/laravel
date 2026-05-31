@@ -99,6 +99,7 @@ final class ModeloController
 
         $validated = $request->validate([
             'editor_state' => ['nullable'],
+            'pdf_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'remove_verso' => ['nullable'],
         ]);
@@ -108,16 +109,27 @@ final class ModeloController
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
 
-        $editorState = $validated['editor_state'] ?? null;
-        if (is_string($editorState)) {
-            $decoded = json_decode($editorState, true);
-            $editorState = is_array($decoded) ? $decoded : null;
-        }
-
         $updates = [
-            'editor_state' => $editorState ? json_encode($editorState) : null,
             'updated_at' => now(),
         ];
+
+        if ($request->has('editor_state')) {
+            $editorState = $validated['editor_state'] ?? null;
+            if (is_string($editorState)) {
+                $decoded = json_decode($editorState, true);
+                $editorState = is_array($decoded) ? $decoded : null;
+            }
+            $updates['editor_state'] = $editorState ? json_encode($editorState) : null;
+        }
+
+        if ($request->hasFile('pdf_base')) {
+            if ($row->pdf_path) {
+                Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->pdf_path));
+            }
+            $pdfFile = $request->file('pdf_base');
+            $updates['pdf_name'] = $pdfFile->getClientOriginalName();
+            $updates['pdf_path'] = $pdfFile->store('modelos', 'public');
+        }
 
         if ($request->boolean('remove_verso')) {
             if ($row->verso_path ?? null) {
