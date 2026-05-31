@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\FiscalSettingController;
 use App\Http\Controllers\Api\FinancialController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\ManualPrintOrderController;
+use App\Http\Controllers\Api\LocalPrintJobController;
 use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\MercadoLivreConfigController;
 use App\Http\Controllers\Api\ModeloController;
@@ -28,6 +29,8 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::post('/integrations/mercado-livre/notifications', [MercadoLivreController::class, 'notifications']);
+Route::get('/print-agent/jobs/next', [LocalPrintJobController::class, 'next']);
+Route::post('/print-agent/jobs/{job}/complete', [LocalPrintJobController::class, 'complete']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -70,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('product-matrices', ProductMatrixController::class)->parameter('product-matrices', 'matrix');
     Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order');
     Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy']);
+    Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
 
     Route::get('/fiscal/settings', [FiscalSettingController::class, 'show']);
     Route::put('/fiscal/settings', [FiscalSettingController::class, 'upsert']);
