@@ -29,6 +29,7 @@ final class LocalPrintJobController
             'print_profile.paperSize' => ['nullable', 'string', 'max:40'],
             'print_profile.quality' => ['nullable', 'string', 'max:40'],
             'print_profile.colorMode' => ['nullable', 'string', 'max:40'],
+            'print_profile.borderMode' => ['nullable', 'string', 'max:40'],
             'print_profile.notes' => ['nullable', 'string', 'max:500'],
             'copies' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'document_html' => ['required', 'string'],
