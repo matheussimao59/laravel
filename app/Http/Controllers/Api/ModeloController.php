@@ -38,15 +38,24 @@ final class ModeloController
             'sheet_size' => ['required', 'string', 'max:50'],
             'orientation' => ['required', 'string', 'max:50'],
             'pdf_base' => ['required', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
+            'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
         ]);
 
         $pdfPath = null;
         $pdfName = null;
+        $versoPath = null;
+        $versoName = null;
 
         if ($request->hasFile('pdf_base')) {
             $pdfFile = $request->file('pdf_base');
             $pdfName = $pdfFile->getClientOriginalName();
             $pdfPath = $pdfFile->store('modelos', 'public');
+        }
+
+        if ($request->hasFile('verso_base')) {
+            $versoFile = $request->file('verso_base');
+            $versoName = $versoFile->getClientOriginalName();
+            $versoPath = $versoFile->store('modelos', 'public');
         }
 
         $id = DB::table('modelos')->insertGetId([
@@ -56,6 +65,8 @@ final class ModeloController
             'orientation' => trim($validated['orientation']),
             'pdf_name' => $pdfName,
             'pdf_path' => $pdfPath,
+            'verso_name' => $versoName,
+            'verso_path' => $versoPath,
             'editor_state' => null,
             'created_at' => now(),
             'updated_at' => now(),
@@ -87,7 +98,9 @@ final class ModeloController
         }
 
         $validated = $request->validate([
-            'editor_state' => ['nullable', 'array'],
+            'editor_state' => ['nullable'],
+            'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
+            'remove_verso' => ['nullable'],
         ]);
 
         $row = $this->getModelForUser($request, $modelo);
@@ -95,12 +108,35 @@ final class ModeloController
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
 
-        DB::table('modelos')
-            ->where('id', $modelo)
-            ->update([
-                'editor_state' => $validated['editor_state'] ? json_encode($validated['editor_state']) : null,
-                'updated_at' => now(),
-            ]);
+        $editorState = $validated['editor_state'] ?? null;
+        if (is_string($editorState)) {
+            $decoded = json_decode($editorState, true);
+            $editorState = is_array($decoded) ? $decoded : null;
+        }
+
+        $updates = [
+            'editor_state' => $editorState ? json_encode($editorState) : null,
+            'updated_at' => now(),
+        ];
+
+        if ($request->boolean('remove_verso')) {
+            if ($row->verso_path ?? null) {
+                Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->verso_path));
+            }
+            $updates['verso_name'] = null;
+            $updates['verso_path'] = null;
+        }
+
+        if ($request->hasFile('verso_base')) {
+            if ($row->verso_path ?? null) {
+                Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->verso_path));
+            }
+            $versoFile = $request->file('verso_base');
+            $updates['verso_name'] = $versoFile->getClientOriginalName();
+            $updates['verso_path'] = $versoFile->store('modelos', 'public');
+        }
+
+        DB::table('modelos')->where('id', $modelo)->update($updates);
 
         $updated = DB::table('modelos')->where('id', $modelo)->first();
 
@@ -119,6 +155,9 @@ final class ModeloController
 
         if ($row->pdf_path) {
             Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->pdf_path));
+        }
+        if ($row->verso_path ?? null) {
+            Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->verso_path));
         }
 
         DB::table('modelos')->where('id', $modelo)->delete();
@@ -148,6 +187,8 @@ final class ModeloController
             'orientation' => (string) $row->orientation,
             'pdf_name' => $row->pdf_name ? (string) $row->pdf_name : null,
             'pdf_url' => $row->pdf_path ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->pdf_path)) : null,
+            'verso_name' => ($row->verso_name ?? null) ? (string) $row->verso_name : null,
+            'verso_url' => ($row->verso_path ?? null) ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->verso_path)) : null,
             'editor_state' => $row->editor_state ? json_decode($row->editor_state, true) : null,
             'created_at' => $row->created_at,
         ];
