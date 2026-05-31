@@ -22,6 +22,14 @@ final class LocalPrintJobController
             'manual_print_order_id' => ['nullable', 'integer', 'exists:manual_print_orders,id'],
             'printer_name' => ['nullable', 'string', 'max:180'],
             'page_order' => ['nullable', 'string', 'in:normal,reverse'],
+            'print_profile' => ['nullable', 'array'],
+            'print_profile.id' => ['nullable', 'string', 'max:80'],
+            'print_profile.name' => ['nullable', 'string', 'max:120'],
+            'print_profile.paperType' => ['nullable', 'string', 'max:80'],
+            'print_profile.paperSize' => ['nullable', 'string', 'max:40'],
+            'print_profile.quality' => ['nullable', 'string', 'max:40'],
+            'print_profile.colorMode' => ['nullable', 'string', 'max:40'],
+            'print_profile.notes' => ['nullable', 'string', 'max:500'],
             'copies' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'document_html' => ['required', 'string'],
         ]);
@@ -40,6 +48,7 @@ final class LocalPrintJobController
             'manual_print_order_id' => $orderId ? (int) $orderId : null,
             'printer_name' => $request->filled('printer_name') ? trim((string) $request->input('printer_name')) : null,
             'page_order' => $request->input('page_order', 'normal'),
+            'print_profile' => $request->has('print_profile') ? json_encode($request->input('print_profile')) : null,
             'copies' => (int) $request->input('copies', 1),
             'status' => 'pending',
             'document_html' => $request->input('document_html'),
@@ -235,6 +244,7 @@ final class LocalPrintJobController
             'manualPrintOrderId' => $row->manual_print_order_id ? (string) $row->manual_print_order_id : null,
             'printerName' => $row->printer_name,
             'pageOrder' => $row->page_order,
+            'printProfile' => $this->decodePrintProfile($row->print_profile ?? null),
             'copies' => (int) $row->copies,
             'status' => $row->status,
             'errorMessage' => $row->error_message,
@@ -249,5 +259,15 @@ final class LocalPrintJobController
         }
 
         return $payload;
+    }
+
+    private function decodePrintProfile(mixed $profile): ?array
+    {
+        if (!$profile) {
+            return null;
+        }
+
+        $decoded = json_decode((string) $profile, true);
+        return is_array($decoded) ? $decoded : null;
     }
 }
