@@ -127,6 +127,58 @@ final class LocalPrintJobController
         return response()->json(['message' => 'Retorno do agente registrado.']);
     }
 
+    public function syncPrinters(Request $request): JsonResponse
+    {
+        $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
+        if (!$userId) {
+            return response()->json(['message' => 'Token do agente invalido.'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'printers' => ['required', 'array'],
+            'printers.*.name' => ['required', 'string', 'max:180'],
+            'printers.*.is_default' => ['nullable', 'boolean'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Dados invalidos das impressoras.', 'errors' => $validator->errors()], 422);
+        }
+
+        $printers = collect($request->input('printers', []))
+            ->map(fn ($printer) => [
+                'name' => trim((string) ($printer['name'] ?? '')),
+                'isDefault' => (bool) ($printer['is_default'] ?? false),
+            ])
+            ->filter(fn ($printer) => $printer['name'] !== '')
+            ->unique('name')
+            ->values()
+            ->all();
+
+        $current = $this->agentConfigForUser($userId);
+        $next = [
+            ...$current,
+            'enabled' => (bool) ($current['enabled'] ?? true),
+            'agentToken' => (string) ($current['agentToken'] ?? $request->bearerToken()),
+            'printers' => array_map(fn ($printer) => $printer['name'], $printers),
+            'printerDetails' => $printers,
+            'lastSeenAt' => now()->toIso8601String(),
+        ];
+
+        DB::table('app_settings')->updateOrInsert(
+            ['id' => self::SETTING_ID, 'user_id' => $userId],
+            [
+                'config_data' => json_encode($next),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
+
+        return response()->json([
+            'message' => 'Impressoras sincronizadas.',
+            'printers' => $printers,
+        ]);
+    }
+
     private function orderBelongsToUser(int $orderId, int $userId): bool
     {
         return DB::table('manual_print_orders')
@@ -155,6 +207,21 @@ final class LocalPrintJobController
         }
 
         return null;
+    }
+
+    private function agentConfigForUser(int $userId): array
+    {
+        $row = DB::table('app_settings')
+            ->where('id', self::SETTING_ID)
+            ->where('user_id', $userId)
+            ->first();
+
+        if (!$row) {
+            return [];
+        }
+
+        $config = json_decode((string) $row->config_data, true);
+        return is_array($config) ? $config : [];
     }
 
     private function mapJob(?object $row, bool $includeDocument): ?array

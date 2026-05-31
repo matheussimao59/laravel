@@ -31,6 +31,7 @@ Route::prefix('auth')->group(function () {
 Route::post('/integrations/mercado-livre/notifications', [MercadoLivreController::class, 'notifications']);
 Route::get('/print-agent/jobs/next', [LocalPrintJobController::class, 'next']);
 Route::post('/print-agent/jobs/{job}/complete', [LocalPrintJobController::class, 'complete']);
+Route::post('/print-agent/printers', [LocalPrintJobController::class, 'syncPrinters']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
