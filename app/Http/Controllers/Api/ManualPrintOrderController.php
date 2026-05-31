@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 final class ManualPrintOrderController
@@ -62,10 +63,9 @@ final class ManualPrintOrderController
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
 
-        $id = DB::table('manual_print_orders')->insertGetId([
+        $insertData = [
             'user_id' => $user->id,
             'modelo_id' => $modelId ? (int) $modelId : null,
-            'platform_order_id' => $request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null,
             'values' => json_encode($request->input('values', [])),
             'quantity' => (int) $request->input('quantity', 1),
             'status' => $request->input('status', 'Dados Pendente'),
@@ -73,7 +73,13 @@ final class ManualPrintOrderController
             'printed_at' => $this->normalizeTimestamp($request->input('printed_at')),
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($this->hasPlatformOrderIdColumn()) {
+            $insertData['platform_order_id'] = $request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null;
+        }
+
+        $id = DB::table('manual_print_orders')->insertGetId($insertData);
 
         $row = DB::table('manual_print_orders')->where('id', $id)->first();
 
@@ -110,16 +116,23 @@ final class ManualPrintOrderController
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
 
-        DB::table('manual_print_orders')->where('id', (int) $order)->update([
+        $updateData = [
             'modelo_id' => $modelId ? (int) $modelId : null,
-            'platform_order_id' => $request->has('platform_order_id') ? ($request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null) : $row->platform_order_id,
             'values' => $request->has('values') ? json_encode($request->input('values', [])) : $row->values,
             'quantity' => $request->has('quantity') ? (int) $request->input('quantity') : (int) $row->quantity,
             'status' => $request->has('status') ? $request->input('status') : $row->status,
             'saved_at' => $request->exists('saved_at') ? $this->normalizeTimestamp($request->input('saved_at')) : $row->saved_at,
             'printed_at' => $request->exists('printed_at') ? $this->normalizeTimestamp($request->input('printed_at')) : $row->printed_at,
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($this->hasPlatformOrderIdColumn()) {
+            $updateData['platform_order_id'] = $request->has('platform_order_id')
+                ? ($request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null)
+                : ($row->platform_order_id ?? null);
+        }
+
+        DB::table('manual_print_orders')->where('id', (int) $order)->update($updateData);
 
         $updated = DB::table('manual_print_orders')->where('id', (int) $order)->first();
 
@@ -171,11 +184,21 @@ final class ManualPrintOrderController
         return Carbon::parse($value)->format('Y-m-d H:i:s');
     }
 
+    private function hasPlatformOrderIdColumn(): bool
+    {
+        static $hasColumn = null;
+        if ($hasColumn === null) {
+            $hasColumn = Schema::hasColumn('manual_print_orders', 'platform_order_id');
+        }
+
+        return $hasColumn;
+    }
+
     private function mapRow(object $row): array
     {
         return [
             'id' => (string) $row->id,
-            'platformOrderId' => $row->platform_order_id ? (string) $row->platform_order_id : null,
+            'platformOrderId' => isset($row->platform_order_id) && $row->platform_order_id ? (string) $row->platform_order_id : null,
             'modelId' => $row->modelo_id ? (string) $row->modelo_id : null,
             'values' => $row->values ? json_decode($row->values, true) : [],
             'quantity' => (int) ($row->quantity ?? 1),
