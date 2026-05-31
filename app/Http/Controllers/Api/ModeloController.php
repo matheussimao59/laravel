@@ -67,7 +67,7 @@ final class ModeloController
             'pdf_path' => $pdfPath,
             'verso_name' => $versoName,
             'verso_path' => $versoPath,
-            'editor_state' => null,
+            'editor_state' => json_encode($this->defaultEditorState()),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -203,6 +203,50 @@ final class ModeloController
             'verso_url' => ($row->verso_path ?? null) ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->verso_path)) : null,
             'editor_state' => $row->editor_state ? json_decode($row->editor_state, true) : null,
             'created_at' => $row->created_at,
+        ];
+    }
+
+    private function defaultEditorState(): array
+    {
+        return [
+            'items' => [
+                $this->defaultTextItem('nome', 'Nome', 'Nome aqui', 58, 72, 76, 40, '#111827', '#ffffff', 4),
+                $this->defaultTextItem('idade', 'Idade', '8 anos', 46, 72, 84, 34, '#111827', '#ffffff', 3),
+            ],
+            'customFonts' => [],
+            'zoom' => 1,
+        ];
+    }
+
+    private function defaultTextItem(
+        string $type,
+        string $title,
+        string $value,
+        int $fontSize,
+        int $left,
+        int $top,
+        int $width,
+        string $color,
+        string $strokeColor,
+        int $strokeWidth
+    ): array {
+        return [
+            'id' => uniqid($type . '-', true),
+            'type' => $type,
+            'title' => $title,
+            'value' => $value,
+            'fontFamily' => 'Inter',
+            'fontSize' => $fontSize,
+            'color' => $color,
+            'strokeColor' => $strokeColor,
+            'strokeWidth' => $strokeWidth,
+            'borderColor' => '#ffffff',
+            'borderWidth' => 0,
+            'borderRadius' => 18,
+            'left' => $left,
+            'top' => $top,
+            'width' => $width,
+            'align' => 'center',
         ];
     }
 }
