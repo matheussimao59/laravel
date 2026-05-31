@@ -63,6 +63,11 @@ final class ManualPrintOrderController
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
 
+        $platformOrderId = $request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null;
+        if ($platformOrderId && $this->hasPlatformOrderIdColumn() && $this->platformOrderExists((int) $user->id, $platformOrderId)) {
+            return response()->json(['message' => 'Pedido da plataforma ja importado.'], 409);
+        }
+
         $insertData = [
             'user_id' => $user->id,
             'modelo_id' => $modelId ? (int) $modelId : null,
@@ -76,7 +81,7 @@ final class ManualPrintOrderController
         ];
 
         if ($this->hasPlatformOrderIdColumn()) {
-            $insertData['platform_order_id'] = $request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null;
+            $insertData['platform_order_id'] = $platformOrderId;
         }
 
         $id = DB::table('manual_print_orders')->insertGetId($insertData);
@@ -192,6 +197,14 @@ final class ManualPrintOrderController
         }
 
         return $hasColumn;
+    }
+
+    private function platformOrderExists(int $userId, string $platformOrderId): bool
+    {
+        return DB::table('manual_print_orders')
+            ->where('user_id', $userId)
+            ->where('platform_order_id', $platformOrderId)
+            ->exists();
     }
 
     private function mapRow(object $row): array
