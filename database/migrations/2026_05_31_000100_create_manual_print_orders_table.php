@@ -13,6 +13,8 @@ return new class() extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('modelo_id')->nullable()->constrained('modelos')->nullOnDelete();
             $table->string('platform_order_id', 120)->nullable();
+            $table->boolean('is_group_order')->default(false);
+            $table->unsignedInteger('group_size')->nullable();
             $table->json('values')->nullable();
             $table->unsignedInteger('quantity')->default(1);
             $table->string('status', 80)->default('Dados Pendente');

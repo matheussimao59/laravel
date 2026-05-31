@@ -47,6 +47,8 @@ final class ManualPrintOrderController
         $validator = Validator::make($request->all(), [
             'model_id' => ['nullable', 'integer', 'exists:modelos,id'],
             'platform_order_id' => ['nullable', 'string', 'max:120'],
+            'is_group_order' => ['nullable', 'boolean'],
+            'group_size' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'values' => ['nullable', 'array'],
             'quantity' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'status' => ['nullable', 'string', 'in:' . implode(',', self::STATUSES)],
@@ -64,7 +66,8 @@ final class ManualPrintOrderController
         }
 
         $platformOrderId = $request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null;
-        if ($platformOrderId && $this->hasPlatformOrderIdColumn() && $this->platformOrderExists((int) $user->id, $platformOrderId)) {
+        $isGroupOrder = $request->boolean('is_group_order');
+        if ($platformOrderId && !$isGroupOrder && $this->hasPlatformOrderIdColumn() && $this->platformOrderExists((int) $user->id, $platformOrderId)) {
             return response()->json(['message' => 'Pedido da plataforma ja importado.'], 409);
         }
 
@@ -82,6 +85,12 @@ final class ManualPrintOrderController
 
         if ($this->hasPlatformOrderIdColumn()) {
             $insertData['platform_order_id'] = $platformOrderId;
+        }
+        if ($this->hasColumn('is_group_order')) {
+            $insertData['is_group_order'] = $isGroupOrder;
+        }
+        if ($this->hasColumn('group_size')) {
+            $insertData['group_size'] = $request->filled('group_size') ? (int) $request->input('group_size') : null;
         }
 
         $id = DB::table('manual_print_orders')->insertGetId($insertData);
@@ -104,6 +113,8 @@ final class ManualPrintOrderController
         $validator = Validator::make($request->all(), [
             'model_id' => ['sometimes', 'nullable', 'integer', 'exists:modelos,id'],
             'platform_order_id' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'is_group_order' => ['sometimes', 'nullable', 'boolean'],
+            'group_size' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:9999'],
             'values' => ['sometimes', 'array'],
             'quantity' => ['sometimes', 'integer', 'min:1', 'max:9999'],
             'status' => ['sometimes', 'string', 'in:' . implode(',', self::STATUSES)],
@@ -135,6 +146,12 @@ final class ManualPrintOrderController
             $updateData['platform_order_id'] = $request->has('platform_order_id')
                 ? ($request->filled('platform_order_id') ? trim((string) $request->input('platform_order_id')) : null)
                 : ($row->platform_order_id ?? null);
+        }
+        if ($this->hasColumn('is_group_order')) {
+            $updateData['is_group_order'] = $request->has('is_group_order') ? $request->boolean('is_group_order') : (bool) ($row->is_group_order ?? false);
+        }
+        if ($this->hasColumn('group_size')) {
+            $updateData['group_size'] = $request->has('group_size') ? ($request->filled('group_size') ? (int) $request->input('group_size') : null) : ($row->group_size ?? null);
         }
 
         DB::table('manual_print_orders')->where('id', (int) $order)->update($updateData);
@@ -191,12 +208,17 @@ final class ManualPrintOrderController
 
     private function hasPlatformOrderIdColumn(): bool
     {
-        static $hasColumn = null;
-        if ($hasColumn === null) {
-            $hasColumn = Schema::hasColumn('manual_print_orders', 'platform_order_id');
+        return $this->hasColumn('platform_order_id');
+    }
+
+    private function hasColumn(string $column): bool
+    {
+        static $columns = [];
+        if (!array_key_exists($column, $columns)) {
+            $columns[$column] = Schema::hasColumn('manual_print_orders', $column);
         }
 
-        return $hasColumn;
+        return $columns[$column];
     }
 
     private function platformOrderExists(int $userId, string $platformOrderId): bool
@@ -212,6 +234,8 @@ final class ManualPrintOrderController
         return [
             'id' => (string) $row->id,
             'platformOrderId' => isset($row->platform_order_id) && $row->platform_order_id ? (string) $row->platform_order_id : null,
+            'isGroupOrder' => isset($row->is_group_order) ? (bool) $row->is_group_order : false,
+            'groupSize' => isset($row->group_size) && $row->group_size ? (int) $row->group_size : null,
             'modelId' => $row->modelo_id ? (string) $row->modelo_id : null,
             'values' => $row->values ? json_decode($row->values, true) : [],
             'quantity' => (int) ($row->quantity ?? 1),
