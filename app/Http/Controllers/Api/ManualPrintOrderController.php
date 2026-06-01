@@ -191,10 +191,17 @@ final class ManualPrintOrderController
 
     private function modelBelongsToUser(int $modelId, int $userId): bool
     {
-        return DB::table('modelos')
+        $query = DB::table('modelos')
             ->where('id', $modelId)
-            ->where('user_id', $userId)
-            ->exists();
+            ->where(function ($query) use ($userId) {
+                $query->where('user_id', $userId);
+
+                if (Schema::hasColumn('modelos', 'is_shared')) {
+                    $query->orWhere('is_shared', true);
+                }
+            });
+
+        return $query->exists();
     }
 
     private function normalizeTimestamp(mixed $value): ?string

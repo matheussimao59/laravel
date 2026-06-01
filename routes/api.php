@@ -89,6 +89,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/modelos', [ModeloController::class, 'index']);
     Route::post('/modelos', [ModeloController::class, 'store']);
     Route::get('/modelos/{modelo}', [ModeloController::class, 'show']);
+    Route::post('/modelos/{modelo}/share', [ModeloController::class, 'share']);
     Route::post('/modelos/{modelo}', [ModeloController::class, 'update']);
     Route::put('/modelos/{modelo}', [ModeloController::class, 'update']);
     Route::delete('/modelos/{modelo}', [ModeloController::class, 'destroy']);

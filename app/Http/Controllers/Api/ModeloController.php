@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 final class ModeloController
@@ -16,11 +17,19 @@ final class ModeloController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
-        $models = DB::table('modelos')
-            ->where('user_id', $user->id)
+        $modelsQuery = DB::table('modelos')
+            ->where(function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+
+                if ($this->hasSharedColumns()) {
+                    $query->orWhere('is_shared', true);
+                }
+            });
+
+        $models = $modelsQuery
             ->orderByDesc('created_at')
             ->get()
-            ->map(fn ($row) => $this->mapRow($row))
+            ->map(fn ($row) => $this->mapRow($row, $user))
             ->values();
 
         return response()->json(['models' => $models]);
@@ -76,18 +85,19 @@ final class ModeloController
 
         return response()->json([
             'message' => 'Modelo criado com sucesso.',
-            'model' => $row ? $this->mapRow($row) : null,
+            'model' => $row ? $this->mapRow($row, $user) : null,
         ]);
     }
 
     public function show(Request $request, $modelo): JsonResponse
     {
-        $row = $this->getModelForUser($request, $modelo);
+        $user = $request->user();
+        $row = $this->getVisibleModelForUser($request, $modelo);
         if (!$row) {
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
 
-        return response()->json(['model' => $this->mapRow($row)]);
+        return response()->json(['model' => $this->mapRow($row, $user)]);
     }
 
     public function update(Request $request, $modelo): JsonResponse
@@ -104,7 +114,7 @@ final class ModeloController
             'remove_verso' => ['nullable'],
         ]);
 
-        $row = $this->getModelForUser($request, $modelo);
+        $row = $this->getOwnedModelForUser($request, $modelo);
         if (!$row) {
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
@@ -154,13 +164,55 @@ final class ModeloController
 
         return response()->json([
             'message' => 'Modelo atualizado com sucesso.',
-            'model' => $updated ? $this->mapRow($updated) : null,
+            'model' => $updated ? $this->mapRow($updated, $user) : null,
+        ]);
+    }
+
+    public function share(Request $request, $modelo): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (($user->role ?? null) !== 'admin') {
+            return response()->json(['message' => 'Apenas administradores podem disponibilizar modelos.'], 403);
+        }
+
+        if (!$this->hasSharedColumns()) {
+            return response()->json(['message' => 'Atualize o banco de dados para compartilhar modelos.'], 409);
+        }
+
+        $row = $this->getOwnedModelForUser($request, $modelo);
+        if (!$row) {
+            return response()->json(['message' => 'Modelo nao encontrado.'], 404);
+        }
+
+        $validated = $request->validate([
+            'is_shared' => ['required', 'boolean'],
+        ]);
+
+        $isShared = (bool) $validated['is_shared'];
+        DB::table('modelos')
+            ->where('id', $modelo)
+            ->where('user_id', $user->id)
+            ->update([
+                'is_shared' => $isShared,
+                'shared_at' => $isShared ? now() : null,
+                'updated_at' => now(),
+            ]);
+
+        $updated = DB::table('modelos')->where('id', $modelo)->first();
+
+        return response()->json([
+            'message' => $isShared ? 'Modelo disponibilizado para outros usuarios.' : 'Modelo removido da lista compartilhada.',
+            'model' => $updated ? $this->mapRow($updated, $user) : null,
         ]);
     }
 
     public function destroy(Request $request, $modelo): JsonResponse
     {
-        $row = $this->getModelForUser($request, $modelo);
+        $row = $this->getOwnedModelForUser($request, $modelo);
         if (!$row) {
             return response()->json(['message' => 'Modelo nao encontrado.'], 404);
         }
@@ -177,7 +229,7 @@ final class ModeloController
         return response()->json(['message' => 'Modelo excluido com sucesso.']);
     }
 
-    private function getModelForUser(Request $request, $modelo)
+    private function getVisibleModelForUser(Request $request, $modelo): ?object
     {
         $user = $request->user();
         if (!$user) {
@@ -185,15 +237,39 @@ final class ModeloController
         }
 
         return DB::table('modelos')
-            ->where('user_id', $user->id)
             ->where('id', $modelo)
+            ->where(function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+
+                if ($this->hasSharedColumns()) {
+                    $query->orWhere('is_shared', true);
+                }
+            })
             ->first();
     }
 
-    private function mapRow(object $row): array
+    private function getOwnedModelForUser(Request $request, $modelo): ?object
     {
+        $user = $request->user();
+        if (!$user) {
+            return null;
+        }
+
+        return DB::table('modelos')
+            ->where('id', $modelo)
+            ->where('user_id', $user->id)
+            ->first();
+    }
+
+    private function mapRow(object $row, ?object $user = null): array
+    {
+        $isOwner = $user ? ((int) $row->user_id === (int) $user->id) : false;
+        $isShared = property_exists($row, 'is_shared') ? (bool) $row->is_shared : false;
+        $isAdmin = $user && (($user->role ?? null) === 'admin');
+
         return [
             'id' => (string) $row->id,
+            'user_id' => (string) $row->user_id,
             'name' => (string) $row->name,
             'sheet_size' => (string) $row->sheet_size,
             'orientation' => (string) $row->orientation,
@@ -202,8 +278,23 @@ final class ModeloController
             'verso_name' => ($row->verso_name ?? null) ? (string) $row->verso_name : null,
             'verso_url' => ($row->verso_path ?? null) ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->verso_path)) : null,
             'editor_state' => $row->editor_state ? json_decode($row->editor_state, true) : null,
+            'is_shared' => $isShared,
+            'shared_at' => property_exists($row, 'shared_at') ? $row->shared_at : null,
+            'is_owner' => $isOwner,
+            'readonly' => !$isOwner,
+            'can_share' => $isAdmin && $isOwner && $this->hasSharedColumns(),
             'created_at' => $row->created_at,
         ];
+    }
+
+    private function hasSharedColumns(): bool
+    {
+        static $hasColumns = null;
+        if ($hasColumns === null) {
+            $hasColumns = Schema::hasColumn('modelos', 'is_shared') && Schema::hasColumn('modelos', 'shared_at');
+        }
+
+        return $hasColumns;
     }
 
     private function defaultEditorState(): array
