@@ -200,7 +200,7 @@ final class ShippingOrderController
         $orderSql = $this->normalizedScanSql('platform_order_number');
         $recipientSql = $this->normalizedScanSql('recipient_name');
 
-        $rows = DB::table('shipping_orders')
+        $matches = DB::table('shipping_orders')
             ->where('user_id', $user->id)
             ->where(function ($builder) use ($term, $normalizedTerm, $prefixTerm, $likeTerm, $normalizedPrefixTerm, $normalizedLikeTerm, $trackingSql, $orderSql, $recipientSql) {
                 $builder
@@ -239,7 +239,47 @@ final class ShippingOrderController
             )
             ->orderByDesc('updated_at')
             ->limit(20)
-            ->get()
+            ->get();
+
+        if ($matches->isEmpty()) {
+            return response()->json(['orders' => []]);
+        }
+
+        $trackingKeys = $matches
+            ->map(fn ($row) => $this->normalizeScanValue((string) ($row->tracking_number ?? '')))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $orderKeys = $matches
+            ->map(fn ($row) => $this->normalizeScanValue((string) ($row->platform_order_number ?? '')))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $groupRows = collect();
+        if (!empty($trackingKeys) || !empty($orderKeys)) {
+            $groupRows = DB::table('shipping_orders')
+                ->where('user_id', $user->id)
+                ->where(function ($builder) use ($trackingKeys, $orderKeys, $trackingSql, $orderSql) {
+                    foreach ($trackingKeys as $key) {
+                        $builder->orWhereRaw("{$trackingSql} = ?", [$key]);
+                    }
+
+                    foreach ($orderKeys as $key) {
+                        $builder->orWhereRaw("{$orderSql} = ?", [$key]);
+                    }
+                })
+                ->orderByDesc('updated_at')
+                ->limit(100)
+                ->get();
+        }
+
+        $rows = $matches
+            ->concat($groupRows)
+            ->unique('id')
+            ->values()
             ->map(fn ($row) => $this->mapRow($row))
             ->values();
 
