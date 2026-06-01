@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 final class LocalPrintJobController
@@ -35,6 +36,7 @@ final class LocalPrintJobController
             'print_profile.driverProfileStatus' => ['nullable', 'string', 'max:40'],
             'print_profile.driverProfileMessage' => ['nullable', 'string', 'max:500'],
             'print_profile.notes' => ['nullable', 'string', 'max:500'],
+            'print_side' => ['nullable', 'string', 'in:front,back'],
             'copies' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'document_html' => ['required', 'string'],
         ]);
@@ -48,7 +50,17 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Pedido de impressao nao encontrado.'], 404);
         }
 
-        $jobId = DB::table('local_print_jobs')->insertGetId([
+        $printSide = $request->input('print_side', 'front') === 'back' ? 'back' : 'front';
+        if ($orderId && $this->hasPrintSideColumn()) {
+            DB::table('local_print_jobs')
+                ->where('user_id', $user->id)
+                ->where('manual_print_order_id', (int) $orderId)
+                ->where('print_side', $printSide)
+                ->whereIn('status', ['pending', 'failed'])
+                ->delete();
+        }
+
+        $insertData = [
             'user_id' => $user->id,
             'manual_print_order_id' => $orderId ? (int) $orderId : null,
             'printer_name' => $request->filled('printer_name') ? trim((string) $request->input('printer_name')) : null,
@@ -59,7 +71,13 @@ final class LocalPrintJobController
             'document_html' => $request->input('document_html'),
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($this->hasPrintSideColumn()) {
+            $insertData['print_side'] = $printSide;
+        }
+
+        $jobId = DB::table('local_print_jobs')->insertGetId($insertData);
 
         $row = DB::table('local_print_jobs')->where('id', $jobId)->first();
 
@@ -457,6 +475,7 @@ final class LocalPrintJobController
             'printerName' => $row->printer_name,
             'pageOrder' => $row->page_order,
             'printProfile' => $this->decodePrintProfile($row->print_profile ?? null),
+            'printSide' => isset($row->print_side) && $row->print_side ? (string) $row->print_side : 'front',
             'copies' => (int) $row->copies,
             'status' => $row->status,
             'errorMessage' => $row->error_message,
@@ -481,5 +500,15 @@ final class LocalPrintJobController
 
         $decoded = json_decode((string) $profile, true);
         return is_array($decoded) ? $decoded : null;
+    }
+
+    private function hasPrintSideColumn(): bool
+    {
+        static $hasColumn = null;
+        if ($hasColumn === null) {
+            $hasColumn = Schema::hasColumn('local_print_jobs', 'print_side');
+        }
+
+        return $hasColumn;
     }
 }
