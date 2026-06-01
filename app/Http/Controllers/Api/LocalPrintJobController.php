@@ -82,6 +82,7 @@ final class LocalPrintJobController
             ->where('user_id', $userId)
             ->where('status', 'pending')
             ->orderBy('created_at')
+            ->orderBy('id')
             ->limit($limit)
             ->get();
 
@@ -100,6 +101,7 @@ final class LocalPrintJobController
         $updatedJobs = DB::table('local_print_jobs')
             ->whereIn('id', $jobIds)
             ->orderBy('created_at')
+            ->orderBy('id')
             ->get()
             ->map(fn ($row) => $this->mapJob($row, true))
             ->values();
