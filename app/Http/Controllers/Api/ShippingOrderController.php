@@ -89,6 +89,7 @@ final class ShippingOrderController
                 (string) $row['import_key'],
                 $row['platform_order_number'] ?? null,
                 $row['tracking_number'] ?? null,
+                $row,
             );
 
             if (!$existing) {
@@ -650,6 +651,7 @@ final class ShippingOrderController
         string $importKey,
         mixed $platformOrderNumber,
         mixed $trackingNumber,
+        array $incomingRow = [],
     ): ?object {
         $existing = DB::table('shipping_orders')
             ->where('user_id', $userId)
@@ -661,8 +663,9 @@ final class ShippingOrderController
         }
 
         $normalizedOrderNumber = $this->normalizeImportedOrderNumber(trim((string) $platformOrderNumber));
+        $incomingIdentity = $this->importedItemIdentity($incomingRow);
         if ($normalizedOrderNumber !== '') {
-            $existing = DB::table('shipping_orders')
+            $candidates = DB::table('shipping_orders')
                 ->where('user_id', $userId)
                 ->where(function ($builder) use ($platformOrderNumber, $normalizedOrderNumber) {
                     $rawValue = trim((string) $platformOrderNumber);
@@ -676,10 +679,17 @@ final class ShippingOrderController
                     );
                 })
                 ->orderByDesc('updated_at')
-                ->first();
+                ->limit(50)
+                ->get();
 
-            if ($existing) {
-                return $existing;
+            foreach ($candidates as $candidate) {
+                if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
+                    return $candidate;
+                }
+            }
+
+            if ($incomingIdentity === '' && $candidates->isNotEmpty()) {
+                return $candidates->first();
             }
         }
 
@@ -688,7 +698,7 @@ final class ShippingOrderController
             return null;
         }
 
-        return DB::table('shipping_orders')
+        $candidates = DB::table('shipping_orders')
             ->where('user_id', $userId)
             ->where(function ($builder) use ($trackingNumber, $normalizedTracking) {
                 $rawValue = trim((string) $trackingNumber);
@@ -702,7 +712,42 @@ final class ShippingOrderController
                 );
             })
             ->orderByDesc('updated_at')
-            ->first();
+            ->limit(50)
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
+                return $candidate;
+            }
+        }
+
+        return $incomingIdentity === '' && $candidates->isNotEmpty() ? $candidates->first() : null;
+    }
+
+    private function importedItemIdentity(mixed $row): string
+    {
+        if (is_array($row)) {
+            $raw = is_array($row['row_raw'] ?? null) ? $row['row_raw'] : [];
+            $sku = $row['sku'] ?? $raw['sku'] ?? null;
+            $adName = $row['ad_name'] ?? $raw['ad_name'] ?? null;
+            $variation = $row['variation'] ?? $raw['variation'] ?? null;
+        } else {
+            $raw = $this->decodeJson($row->row_raw ?? null) ?: [];
+            $sku = $raw['sku'] ?? null;
+            $adName = $row->ad_name ?? $raw['ad_name'] ?? null;
+            $variation = $row->variation ?? $raw['variation'] ?? null;
+        }
+
+        $skuKey = $this->normalizeImportedOrderNumber(trim((string) $sku));
+        if ($skuKey !== '') {
+            return 'sku:' . $skuKey;
+        }
+
+        $title = $this->normalizeScanValue(trim((string) $adName));
+        $variant = $this->normalizeScanValue(trim((string) $variation));
+        $identity = trim($title . '|' . $variant, '|');
+
+        return $identity === '' ? '' : 'item:' . $identity;
     }
 
     private function normalizeIncomingShippingField(string $field, mixed $value): mixed
