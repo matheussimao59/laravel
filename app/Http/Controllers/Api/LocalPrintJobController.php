@@ -73,25 +73,38 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
-        $job = DB::table('local_print_jobs')
+        $limit = max(1, min(6, (int) $request->query('limit', 1)));
+
+        $jobs = DB::table('local_print_jobs')
             ->where('user_id', $userId)
             ->where('status', 'pending')
             ->orderBy('created_at')
-            ->first();
+            ->limit($limit)
+            ->get();
 
-        if (!$job) {
+        if ($jobs->isEmpty()) {
             return response()->json(['job' => null]);
         }
 
-        DB::table('local_print_jobs')->where('id', $job->id)->update([
+        $jobIds = $jobs->pluck('id')->all();
+
+        DB::table('local_print_jobs')->whereIn('id', $jobIds)->update([
             'status' => 'processing',
             'picked_at' => now(),
             'updated_at' => now(),
         ]);
 
-        $updated = DB::table('local_print_jobs')->where('id', $job->id)->first();
+        $updatedJobs = DB::table('local_print_jobs')
+            ->whereIn('id', $jobIds)
+            ->orderBy('created_at')
+            ->get()
+            ->map(fn ($row) => $this->mapJob($row, true))
+            ->values();
 
-        return response()->json(['job' => $this->mapJob($updated, true)]);
+        return response()->json([
+            'job' => $updatedJobs->first(),
+            'jobs' => $updatedJobs,
+        ]);
     }
 
     public function complete(Request $request, string $job): JsonResponse
