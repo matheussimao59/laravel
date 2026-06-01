@@ -25,6 +25,7 @@ final class LocalPrintJobController
             'print_profile' => ['nullable', 'array'],
             'print_profile.id' => ['nullable', 'string', 'max:80'],
             'print_profile.name' => ['nullable', 'string', 'max:120'],
+            'print_profile.printerName' => ['nullable', 'string', 'max:180'],
             'print_profile.paperType' => ['nullable', 'string', 'max:80'],
             'print_profile.paperSize' => ['nullable', 'string', 'max:40'],
             'print_profile.quality' => ['nullable', 'string', 'max:40'],
@@ -126,7 +127,7 @@ final class LocalPrintJobController
             'updated_at' => now(),
         ]);
 
-        if ($status === 'printed' && $row->manual_print_order_id) {
+        if ($status === 'printed' && $row->manual_print_order_id && !$this->hasUnfinishedJobsForOrder((int) $row->manual_print_order_id, $userId)) {
             DB::table('manual_print_orders')->where('id', $row->manual_print_order_id)->update([
                 'status' => 'Impresso',
                 'printed_at' => now(),
@@ -194,6 +195,15 @@ final class LocalPrintJobController
         return DB::table('manual_print_orders')
             ->where('id', $orderId)
             ->where('user_id', $userId)
+            ->exists();
+    }
+
+    private function hasUnfinishedJobsForOrder(int $orderId, int $userId): bool
+    {
+        return DB::table('local_print_jobs')
+            ->where('manual_print_order_id', $orderId)
+            ->where('user_id', $userId)
+            ->where('status', '!=', 'printed')
             ->exists();
     }
 
