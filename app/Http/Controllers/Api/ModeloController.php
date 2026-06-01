@@ -312,6 +312,94 @@ final class ModeloController
         ]);
     }
 
+    public function updateBulkAccessUsers(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (($user->role ?? null) !== 'admin') {
+            return response()->json(['message' => 'Apenas administradores podem gerenciar acesso aos modelos.'], 403);
+        }
+
+        if (!$this->hasAccessTable()) {
+            return response()->json(['message' => 'Atualize o banco de dados para liberar modelos por usuario.'], 409);
+        }
+
+        $validated = $request->validate([
+            'model_ids' => ['required', 'array', 'min:1'],
+            'model_ids.*' => ['integer', 'exists:modelos,id'],
+            'user_ids' => ['nullable', 'array'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $modelIds = collect($validated['model_ids'])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $ownedModelIds = DB::table('modelos')
+            ->where('user_id', $user->id)
+            ->whereIn('id', $modelIds)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        if ($ownedModelIds->isEmpty() || $ownedModelIds->count() !== $modelIds->count()) {
+            return response()->json(['message' => 'Um ou mais modelos nao pertencem ao usuario admin.'], 404);
+        }
+
+        $userIds = collect($validated['user_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id !== (int) $user->id)
+            ->unique()
+            ->values();
+
+        $activeUserIds = DB::table('users')
+            ->whereIn('id', $userIds)
+            ->where('is_active', 1)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        DB::transaction(function () use ($ownedModelIds, $user, $activeUserIds) {
+            DB::table('modelo_user_accesses')->whereIn('modelo_id', $ownedModelIds)->delete();
+
+            if ($activeUserIds->isEmpty()) {
+                return;
+            }
+
+            $now = now();
+            $rows = [];
+            foreach ($ownedModelIds as $modelId) {
+                foreach ($activeUserIds as $userId) {
+                    $rows[] = [
+                        'modelo_id' => (int) $modelId,
+                        'user_id' => (int) $userId,
+                        'granted_by_user_id' => (int) $user->id,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+            }
+
+            DB::table('modelo_user_accesses')->insert($rows);
+        });
+
+        $models = DB::table('modelos')
+            ->whereIn('id', $ownedModelIds)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn ($row) => $this->mapRow($row, $user))
+            ->values();
+
+        return response()->json([
+            'message' => 'Acesso dos modelos selecionados atualizado.',
+            'models' => $models,
+        ]);
+    }
+
     public function destroy(Request $request, $modelo): JsonResponse
     {
         $row = $this->getOwnedModelForUser($request, $modelo);
