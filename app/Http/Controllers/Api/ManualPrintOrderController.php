@@ -199,6 +199,15 @@ final class ManualPrintOrderController
                 if (Schema::hasColumn('modelos', 'is_shared')) {
                     $query->orWhere('is_shared', true);
                 }
+
+                if (Schema::hasTable('modelo_user_accesses')) {
+                    $query->orWhereExists(function ($subQuery) use ($userId) {
+                        $subQuery->selectRaw('1')
+                            ->from('modelo_user_accesses')
+                            ->whereColumn('modelo_user_accesses.modelo_id', 'modelos.id')
+                            ->where('modelo_user_accesses.user_id', $userId);
+                    });
+                }
             });
 
         return $query->exists();

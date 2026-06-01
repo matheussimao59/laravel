@@ -24,6 +24,15 @@ final class ModeloController
                 if ($this->hasSharedColumns()) {
                     $query->orWhere('is_shared', true);
                 }
+
+                if ($this->hasAccessTable()) {
+                    $query->orWhereExists(function ($subQuery) use ($user) {
+                        $subQuery->selectRaw('1')
+                            ->from('modelo_user_accesses')
+                            ->whereColumn('modelo_user_accesses.modelo_id', 'modelos.id')
+                            ->where('modelo_user_accesses.user_id', $user->id);
+                    });
+                }
             });
 
         $models = $modelsQuery
@@ -98,6 +107,34 @@ final class ModeloController
         }
 
         return response()->json(['model' => $this->mapRow($row, $user)]);
+    }
+
+    public function accessUsers(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (($user->role ?? null) !== 'admin') {
+            return response()->json(['message' => 'Apenas administradores podem gerenciar acesso aos modelos.'], 403);
+        }
+
+        $users = DB::table('users')
+            ->select('id', 'name', 'email', 'role', 'is_active')
+            ->where('id', '<>', $user->id)
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($row) => [
+                'id' => (string) $row->id,
+                'name' => (string) $row->name,
+                'email' => (string) $row->email,
+                'role' => $row->role ? (string) $row->role : null,
+                'is_active' => (bool) $row->is_active,
+            ])
+            ->values();
+
+        return response()->json(['users' => $users]);
     }
 
     public function update(Request $request, $modelo): JsonResponse
@@ -210,6 +247,71 @@ final class ModeloController
         ]);
     }
 
+    public function updateAccessUsers(Request $request, $modelo): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        if (($user->role ?? null) !== 'admin') {
+            return response()->json(['message' => 'Apenas administradores podem gerenciar acesso aos modelos.'], 403);
+        }
+
+        if (!$this->hasAccessTable()) {
+            return response()->json(['message' => 'Atualize o banco de dados para liberar modelos por usuario.'], 409);
+        }
+
+        $row = $this->getOwnedModelForUser($request, $modelo);
+        if (!$row) {
+            return response()->json(['message' => 'Modelo nao encontrado.'], 404);
+        }
+
+        $validated = $request->validate([
+            'user_ids' => ['nullable', 'array'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $userIds = collect($validated['user_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id !== (int) $user->id)
+            ->unique()
+            ->values();
+
+        $activeUserIds = DB::table('users')
+            ->whereIn('id', $userIds)
+            ->where('is_active', 1)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        DB::transaction(function () use ($modelo, $user, $activeUserIds) {
+            DB::table('modelo_user_accesses')->where('modelo_id', $modelo)->delete();
+
+            if ($activeUserIds->isEmpty()) {
+                return;
+            }
+
+            $now = now();
+            DB::table('modelo_user_accesses')->insert(
+                $activeUserIds->map(fn ($userId) => [
+                    'modelo_id' => (int) $modelo,
+                    'user_id' => $userId,
+                    'granted_by_user_id' => (int) $user->id,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ])->all()
+            );
+        });
+
+        $updated = DB::table('modelos')->where('id', $modelo)->first();
+
+        return response()->json([
+            'message' => 'Acesso dos usuarios atualizado.',
+            'model' => $updated ? $this->mapRow($updated, $user) : null,
+        ]);
+    }
+
     public function destroy(Request $request, $modelo): JsonResponse
     {
         $row = $this->getOwnedModelForUser($request, $modelo);
@@ -244,6 +346,15 @@ final class ModeloController
                 if ($this->hasSharedColumns()) {
                     $query->orWhere('is_shared', true);
                 }
+
+                if ($this->hasAccessTable()) {
+                    $query->orWhereExists(function ($subQuery) use ($user) {
+                        $subQuery->selectRaw('1')
+                            ->from('modelo_user_accesses')
+                            ->whereColumn('modelo_user_accesses.modelo_id', 'modelos.id')
+                            ->where('modelo_user_accesses.user_id', $user->id);
+                    });
+                }
             })
             ->first();
     }
@@ -266,6 +377,16 @@ final class ModeloController
         $isOwner = $user ? ((int) $row->user_id === (int) $user->id) : false;
         $isShared = property_exists($row, 'is_shared') ? (bool) $row->is_shared : false;
         $isAdmin = $user && (($user->role ?? null) === 'admin');
+        $sharedUserIds = [];
+
+        if ($isAdmin && $isOwner && $this->hasAccessTable()) {
+            $sharedUserIds = DB::table('modelo_user_accesses')
+                ->where('modelo_id', $row->id)
+                ->pluck('user_id')
+                ->map(fn ($id) => (string) $id)
+                ->values()
+                ->all();
+        }
 
         return [
             'id' => (string) $row->id,
@@ -283,6 +404,8 @@ final class ModeloController
             'is_owner' => $isOwner,
             'readonly' => !$isOwner,
             'can_share' => $isAdmin && $isOwner && $this->hasSharedColumns(),
+            'can_manage_access' => $isAdmin && $isOwner && $this->hasAccessTable(),
+            'shared_user_ids' => $sharedUserIds,
             'created_at' => $row->created_at,
         ];
     }
@@ -295,6 +418,16 @@ final class ModeloController
         }
 
         return $hasColumns;
+    }
+
+    private function hasAccessTable(): bool
+    {
+        static $hasTable = null;
+        if ($hasTable === null) {
+            $hasTable = Schema::hasTable('modelo_user_accesses');
+        }
+
+        return $hasTable;
     }
 
     private function defaultEditorState(): array
