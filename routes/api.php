@@ -32,6 +32,8 @@ Route::post('/integrations/mercado-livre/notifications', [MercadoLivreController
 Route::get('/print-agent/jobs/next', [LocalPrintJobController::class, 'next']);
 Route::post('/print-agent/jobs/{job}/complete', [LocalPrintJobController::class, 'complete']);
 Route::post('/print-agent/printers', [LocalPrintJobController::class, 'syncPrinters']);
+Route::get('/print-agent/commands/next', [LocalPrintJobController::class, 'nextCommand']);
+Route::post('/print-agent/commands/{command}/complete', [LocalPrintJobController::class, 'completeCommand']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -75,6 +77,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order');
     Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy']);
     Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
+    Route::post('/print-agent/profiles/{profile}/capture', [LocalPrintJobController::class, 'captureProfile']);
 
     Route::get('/fiscal/settings', [FiscalSettingController::class, 'show']);
     Route::put('/fiscal/settings', [FiscalSettingController::class, 'upsert']);

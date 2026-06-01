@@ -31,6 +31,9 @@ final class LocalPrintJobController
             'print_profile.quality' => ['nullable', 'string', 'max:40'],
             'print_profile.colorMode' => ['nullable', 'string', 'max:40'],
             'print_profile.borderMode' => ['nullable', 'string', 'max:40'],
+            'print_profile.driverProfileCapturedAt' => ['nullable', 'string', 'max:80'],
+            'print_profile.driverProfileStatus' => ['nullable', 'string', 'max:40'],
+            'print_profile.driverProfileMessage' => ['nullable', 'string', 'max:500'],
             'print_profile.notes' => ['nullable', 'string', 'max:500'],
             'copies' => ['nullable', 'integer', 'min:1', 'max:9999'],
             'document_html' => ['required', 'string'],
@@ -151,6 +154,148 @@ final class LocalPrintJobController
         return response()->json(['message' => 'Retorno do agente registrado.']);
     }
 
+    public function captureProfile(Request $request, string $profile): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'printer_name' => ['required', 'string', 'max:180'],
+            'profile_name' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Dados invalidos para captura do perfil.', 'errors' => $validator->errors()], 422);
+        }
+
+        $userId = (int) $user->id;
+        $profileId = trim($profile);
+        $printerName = trim((string) $request->input('printer_name'));
+        $commandId = 'capture-' . $profileId . '-' . now()->format('YmdHis') . '-' . bin2hex(random_bytes(4));
+        $config = $this->agentConfigForUser($userId);
+
+        $commands = array_values(array_filter(
+            is_array($config['pendingCommands'] ?? null) ? $config['pendingCommands'] : [],
+            fn ($command) => is_array($command)
+                && (($command['status'] ?? 'pending') !== 'completed')
+                && (($command['status'] ?? 'pending') !== 'failed')
+                && !(
+                    ($command['type'] ?? null) === 'capture_print_profile'
+                    && ($command['profileId'] ?? null) === $profileId
+                )
+        ));
+
+        $commands[] = [
+            'id' => $commandId,
+            'type' => 'capture_print_profile',
+            'profileId' => $profileId,
+            'profileName' => trim((string) $request->input('profile_name', $profileId)),
+            'printerName' => $printerName,
+            'status' => 'pending',
+            'createdAt' => now()->toIso8601String(),
+        ];
+
+        $config['pendingCommands'] = $commands;
+        $config['printProfiles'] = $this->markProfileCapturePending($config['printProfiles'] ?? [], $profileId);
+        $this->saveAgentConfigForUser($userId, $config);
+
+        return response()->json([
+            'message' => 'Pedido de captura enviado para o agente. Ele abrira as Preferencias da impressora para escolher papel, qualidade e margem.',
+            'command' => [
+                'id' => $commandId,
+                'type' => 'capture_print_profile',
+                'profileId' => $profileId,
+                'printerName' => $printerName,
+            ],
+        ], 202);
+    }
+
+    public function nextCommand(Request $request): JsonResponse
+    {
+        $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
+        if (!$userId) {
+            return response()->json(['message' => 'Token do agente invalido.'], 401);
+        }
+
+        $config = $this->agentConfigForUser($userId);
+        $commands = is_array($config['pendingCommands'] ?? null) ? $config['pendingCommands'] : [];
+        $selected = null;
+
+        foreach ($commands as $index => $command) {
+            if (is_array($command) && (($command['status'] ?? 'pending') === 'pending')) {
+                $commands[$index]['status'] = 'processing';
+                $commands[$index]['pickedAt'] = now()->toIso8601String();
+                $selected = $commands[$index];
+                break;
+            }
+        }
+
+        if (!$selected) {
+            return response()->json(['command' => null]);
+        }
+
+        $config['pendingCommands'] = $commands;
+        $this->saveAgentConfigForUser($userId, $config);
+
+        return response()->json(['command' => $selected]);
+    }
+
+    public function completeCommand(Request $request, string $command): JsonResponse
+    {
+        $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
+        if (!$userId) {
+            return response()->json(['message' => 'Token do agente invalido.'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'status' => ['required', 'string', 'in:completed,failed'],
+            'profile_id' => ['nullable', 'string', 'max:80'],
+            'message' => ['nullable', 'string', 'max:1000'],
+            'captured_at' => ['nullable', 'string', 'max:80'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Dados invalidos para retorno do comando.', 'errors' => $validator->errors()], 422);
+        }
+
+        $config = $this->agentConfigForUser($userId);
+        $commands = is_array($config['pendingCommands'] ?? null) ? $config['pendingCommands'] : [];
+        $profileId = trim((string) $request->input('profile_id'));
+        $status = (string) $request->input('status');
+        $message = trim((string) $request->input('message', ''));
+
+        foreach ($commands as $index => $row) {
+            if (is_array($row) && (($row['id'] ?? null) === $command)) {
+                $profileId = $profileId !== '' ? $profileId : (string) ($row['profileId'] ?? '');
+                $commands[$index]['status'] = $status;
+                $commands[$index]['message'] = $message;
+                $commands[$index]['completedAt'] = now()->toIso8601String();
+                break;
+            }
+        }
+
+        $config['pendingCommands'] = array_values(array_filter(
+            $commands,
+            fn ($row) => is_array($row) && !in_array(($row['status'] ?? null), ['completed', 'failed'], true)
+        ));
+
+        if ($profileId !== '') {
+            $config['printProfiles'] = $this->markProfileCaptureCompleted(
+                $config['printProfiles'] ?? [],
+                $profileId,
+                $status,
+                $message,
+                $request->input('captured_at') ?: now()->toIso8601String(),
+            );
+        }
+
+        $this->saveAgentConfigForUser($userId, $config);
+
+        return response()->json(['message' => 'Comando registrado.']);
+    }
+
     public function syncPrinters(Request $request): JsonResponse
     {
         $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
@@ -255,6 +400,47 @@ final class LocalPrintJobController
 
         $config = json_decode((string) $row->config_data, true);
         return is_array($config) ? $config : [];
+    }
+
+    private function saveAgentConfigForUser(int $userId, array $config): void
+    {
+        DB::table('app_settings')->updateOrInsert(
+            ['id' => self::SETTING_ID, 'user_id' => $userId],
+            [
+                'config_data' => json_encode($config),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
+    }
+
+    private function markProfileCapturePending(mixed $profiles, string $profileId): array
+    {
+        $rows = is_array($profiles) ? $profiles : [];
+        foreach ($rows as $index => $profile) {
+            if (is_array($profile) && (string) ($profile['id'] ?? '') === $profileId) {
+                $rows[$index]['driverProfileStatus'] = 'pending';
+                $rows[$index]['driverProfileMessage'] = 'Aguardando agente capturar as preferencias do driver.';
+            }
+        }
+
+        return $rows;
+    }
+
+    private function markProfileCaptureCompleted(mixed $profiles, string $profileId, string $status, string $message, string $capturedAt): array
+    {
+        $rows = is_array($profiles) ? $profiles : [];
+        foreach ($rows as $index => $profile) {
+            if (is_array($profile) && (string) ($profile['id'] ?? '') === $profileId) {
+                $rows[$index]['driverProfileStatus'] = $status === 'completed' ? 'captured' : 'failed';
+                $rows[$index]['driverProfileMessage'] = $message;
+                if ($status === 'completed') {
+                    $rows[$index]['driverProfileCapturedAt'] = $capturedAt;
+                }
+            }
+        }
+
+        return $rows;
     }
 
     private function mapJob(?object $row, bool $includeDocument): ?array
