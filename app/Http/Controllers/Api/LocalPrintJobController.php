@@ -96,39 +96,37 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
-        $limit = max(1, min(6, (int) $request->query('limit', 1)));
+        $job = DB::transaction(function () use ($userId) {
+            $nextJob = DB::table('local_print_jobs')
+                ->where('user_id', $userId)
+                ->whereIn('status', ['pending', 'processing'])
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
 
-        $jobs = DB::table('local_print_jobs')
-            ->where('user_id', $userId)
-            ->where('status', 'pending')
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->limit($limit)
-            ->get();
+            if (!$nextJob || $nextJob->status === 'processing') {
+                return null;
+            }
 
-        if ($jobs->isEmpty()) {
+            DB::table('local_print_jobs')->where('id', $nextJob->id)->update([
+                'status' => 'processing',
+                'picked_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            return DB::table('local_print_jobs')->where('id', $nextJob->id)->first();
+        });
+
+        if (!$job) {
             return response()->json(['job' => null]);
         }
 
-        $jobIds = $jobs->pluck('id')->all();
-
-        DB::table('local_print_jobs')->whereIn('id', $jobIds)->update([
-            'status' => 'processing',
-            'picked_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        $updatedJobs = DB::table('local_print_jobs')
-            ->whereIn('id', $jobIds)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get()
-            ->map(fn ($row) => $this->mapJob($row, true))
-            ->values();
+        $mappedJob = $this->mapJob($job, true);
 
         return response()->json([
-            'job' => $updatedJobs->first(),
-            'jobs' => $updatedJobs,
+            'job' => $mappedJob,
+            'jobs' => [$mappedJob],
         ]);
     }
 
