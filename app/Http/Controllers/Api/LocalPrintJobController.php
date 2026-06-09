@@ -97,15 +97,53 @@ final class LocalPrintJobController
         }
 
         $job = DB::transaction(function () use ($userId) {
+            $staleBefore = now()->subMinutes(3)->toDateTimeString();
+            $processingJob = DB::table('local_print_jobs')
+                ->where('user_id', $userId)
+                ->where('status', 'processing')
+                ->orderBy('picked_at')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+
+            if (
+                $processingJob
+                && (!$processingJob->picked_at || $processingJob->picked_at <= $staleBefore)
+            ) {
+                DB::table('local_print_jobs')
+                    ->where('user_id', $userId)
+                    ->where('status', 'processing')
+                    ->where(function ($query) use ($staleBefore) {
+                        $query->whereNull('picked_at')->orWhere('picked_at', '<=', $staleBefore);
+                    })
+                    ->update([
+                        'status' => 'failed',
+                        'error_message' => 'Trabalho liberado automaticamente porque o agente nao confirmou a impressao.',
+                        'updated_at' => now(),
+                    ]);
+
+                $processingJob = DB::table('local_print_jobs')
+                    ->where('user_id', $userId)
+                    ->where('status', 'processing')
+                    ->orderBy('picked_at')
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if ($processingJob) {
+                return null;
+            }
+
             $nextJob = DB::table('local_print_jobs')
                 ->where('user_id', $userId)
-                ->whereIn('status', ['pending', 'processing'])
+                ->where('status', 'pending')
                 ->orderBy('created_at')
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->first();
 
-            if (!$nextJob || $nextJob->status === 'processing') {
+            if (!$nextJob) {
                 return null;
             }
 
