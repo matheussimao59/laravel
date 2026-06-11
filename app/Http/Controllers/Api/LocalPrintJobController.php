@@ -264,7 +264,7 @@ final class LocalPrintJobController
 
         $deleted = DB::table('local_print_jobs')
             ->where('user_id', $user->id)
-            ->whereIn('status', ['printed', 'cancelled'])
+            ->whereIn('status', ['printed', 'cancelled', 'failed'])
             ->delete();
 
         return response()->json([
