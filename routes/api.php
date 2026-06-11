@@ -78,6 +78,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy']);
     Route::get('/print/jobs', [LocalPrintJobController::class, 'index']);
     Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
+    Route::delete('/print/jobs/completed', [LocalPrintJobController::class, 'clearCompleted']);
     Route::post('/print/jobs/{job}/retry', [LocalPrintJobController::class, 'retry']);
     Route::post('/print/jobs/{job}/cancel', [LocalPrintJobController::class, 'cancel']);
     Route::post('/print-agent/profiles/{profile}/capture', [LocalPrintJobController::class, 'captureProfile']);

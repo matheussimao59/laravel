@@ -255,6 +255,26 @@ final class LocalPrintJobController
         ]);
     }
 
+    public function clearCompleted(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $deleted = DB::table('local_print_jobs')
+            ->where('user_id', $user->id)
+            ->whereIn('status', ['printed', 'cancelled'])
+            ->delete();
+
+        return response()->json([
+            'message' => $deleted > 0
+                ? "$deleted trabalho(s) removido(s) do historico."
+                : 'Nenhum trabalho concluido para limpar.',
+            'deleted' => $deleted,
+        ]);
+    }
+
     public function cancel(Request $request, string $job): JsonResponse
     {
         $row = $this->jobForAuthenticatedUser($request, $job);
