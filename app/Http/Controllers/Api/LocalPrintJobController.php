@@ -137,6 +137,11 @@ final class LocalPrintJobController
                 ->map(fn ($printer) => trim((string) $printer))
                 ->filter()
                 ->all();
+            $config = $this->agentConfigForUser($userId);
+            $pausedPrinters = array_values(array_filter(array_map(
+                fn ($printer) => trim((string) $printer),
+                is_array($config['pausedPrinters'] ?? null) ? $config['pausedPrinters'] : []
+            )));
 
             $pendingJobs = DB::table('local_print_jobs')
                 ->where('user_id', $userId)
@@ -150,7 +155,7 @@ final class LocalPrintJobController
             $selected = [];
             foreach ($pendingJobs as $pendingJob) {
                 $printer = trim((string) $pendingJob->printer_name);
-                if ($printer === '' || in_array($printer, $busyPrinters, true)) {
+                if ($printer === '' || in_array($printer, $busyPrinters, true) || in_array($printer, $pausedPrinters, true)) {
                     continue;
                 }
                 $selected[] = $pendingJob;
