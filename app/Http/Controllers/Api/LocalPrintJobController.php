@@ -12,6 +12,25 @@ final class LocalPrintJobController
 {
     private const SETTING_ID = 'local_print_agent_config';
 
+    public function index(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $limit = max(1, min(200, (int) $request->input('limit', 80)));
+        $rows = DB::table('local_print_jobs')
+            ->where('user_id', $user->id)
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
+
+        return response()->json([
+            'jobs' => $rows->map(fn ($row) => $this->mapJob($row, false))->values(),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -210,6 +229,52 @@ final class LocalPrintJobController
         }
 
         return response()->json(['message' => 'Retorno do agente registrado.']);
+    }
+
+    public function retry(Request $request, string $job): JsonResponse
+    {
+        $row = $this->jobForAuthenticatedUser($request, $job);
+        if ($row instanceof JsonResponse) {
+            return $row;
+        }
+        if (!in_array($row->status, ['failed', 'cancelled'], true)) {
+            return response()->json(['message' => 'Somente trabalhos com falha ou cancelados podem ser reenviados.'], 422);
+        }
+
+        DB::table('local_print_jobs')->where('id', $row->id)->update([
+            'status' => 'pending',
+            'error_message' => null,
+            'picked_at' => null,
+            'printed_at' => null,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Trabalho reenviado para a fila.',
+            'job' => $this->mapJob(DB::table('local_print_jobs')->where('id', $row->id)->first(), false),
+        ]);
+    }
+
+    public function cancel(Request $request, string $job): JsonResponse
+    {
+        $row = $this->jobForAuthenticatedUser($request, $job);
+        if ($row instanceof JsonResponse) {
+            return $row;
+        }
+        if (!in_array($row->status, ['pending', 'failed'], true)) {
+            return response()->json(['message' => 'Este trabalho ja foi recebido pelo agente e nao pode ser cancelado aqui.'], 422);
+        }
+
+        DB::table('local_print_jobs')->where('id', $row->id)->update([
+            'status' => 'cancelled',
+            'error_message' => null,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Trabalho cancelado.',
+            'job' => $this->mapJob(DB::table('local_print_jobs')->where('id', $row->id)->first(), false),
+        ]);
     }
 
     public function captureProfile(Request $request, string $profile): JsonResponse
@@ -414,12 +479,27 @@ final class LocalPrintJobController
             ->exists();
     }
 
+    private function jobForAuthenticatedUser(Request $request, string $job): object|JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $row = DB::table('local_print_jobs')
+            ->where('id', (int) $job)
+            ->where('user_id', $user->id)
+            ->first();
+
+        return $row ?: response()->json(['message' => 'Trabalho de impressao nao encontrado.'], 404);
+    }
+
     private function hasUnfinishedJobsForOrder(int $orderId, int $userId): bool
     {
         return DB::table('local_print_jobs')
             ->where('manual_print_order_id', $orderId)
             ->where('user_id', $userId)
-            ->where('status', '!=', 'printed')
+            ->whereIn('status', ['pending', 'processing', 'failed'])
             ->exists();
     }
 

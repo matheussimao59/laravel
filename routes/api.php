@@ -76,7 +76,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('product-matrices', ProductMatrixController::class)->parameter('product-matrices', 'matrix');
     Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order');
     Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy']);
+    Route::get('/print/jobs', [LocalPrintJobController::class, 'index']);
     Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
+    Route::post('/print/jobs/{job}/retry', [LocalPrintJobController::class, 'retry']);
+    Route::post('/print/jobs/{job}/cancel', [LocalPrintJobController::class, 'cancel']);
     Route::post('/print-agent/profiles/{profile}/capture', [LocalPrintJobController::class, 'captureProfile']);
 
     Route::get('/fiscal/settings', [FiscalSettingController::class, 'show']);
