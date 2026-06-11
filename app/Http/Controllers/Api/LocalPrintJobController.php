@@ -269,8 +269,8 @@ final class LocalPrintJobController
 
         return response()->json([
             'message' => $deleted > 0
-                ? "$deleted trabalho(s) removido(s) do historico."
-                : 'Nenhum trabalho concluido para limpar.',
+                ? "Todo o historico foi limpo: $deleted trabalho(s) removido(s)."
+                : 'O historico ja esta vazio.',
             'deleted' => $deleted,
         ]);
     }
