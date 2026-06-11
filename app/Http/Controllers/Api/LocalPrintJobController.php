@@ -212,6 +212,10 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Trabalho de impressao nao encontrado.'], 404);
         }
 
+        if ($row->status === 'cancelled') {
+            return response()->json(['message' => 'Trabalho ja cancelado pelo operador.']);
+        }
+
         $status = $request->input('status');
         DB::table('local_print_jobs')->where('id', (int) $job)->update([
             'status' => $status,
@@ -281,13 +285,13 @@ final class LocalPrintJobController
         if ($row instanceof JsonResponse) {
             return $row;
         }
-        if (!in_array($row->status, ['pending', 'failed'], true)) {
-            return response()->json(['message' => 'Este trabalho ja foi recebido pelo agente e nao pode ser cancelado aqui.'], 422);
+        if (!in_array($row->status, ['pending', 'processing', 'failed'], true)) {
+            return response()->json(['message' => 'Este trabalho nao pode mais ser cancelado.'], 422);
         }
 
         DB::table('local_print_jobs')->where('id', $row->id)->update([
             'status' => 'cancelled',
-            'error_message' => null,
+            'error_message' => $row->status === 'processing' ? 'Cancelado pelo operador durante o envio.' : null,
             'updated_at' => now(),
         ]);
 
