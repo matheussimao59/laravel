@@ -479,7 +479,7 @@ final class LocalPrintJobController
             ->exists();
     }
 
-    private function jobForAuthenticatedUser(Request $request, string $job): object|JsonResponse
+    private function jobForAuthenticatedUser(Request $request, string $job): object
     {
         $user = $request->user();
         if (!$user) {
