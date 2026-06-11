@@ -115,75 +115,74 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
-        $job = DB::transaction(function () use ($userId) {
+        $limit = max(1, min(10, (int) $request->input('limit', 1)));
+        $jobs = DB::transaction(function () use ($userId, $limit) {
             $staleBefore = now()->subMinutes(3)->toDateTimeString();
-            $processingJob = DB::table('local_print_jobs')
+            DB::table('local_print_jobs')
                 ->where('user_id', $userId)
                 ->where('status', 'processing')
-                ->orderBy('picked_at')
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->first();
+                ->where(function ($query) use ($staleBefore) {
+                    $query->whereNull('picked_at')->orWhere('picked_at', '<=', $staleBefore);
+                })
+                ->update([
+                    'status' => 'failed',
+                    'error_message' => 'Trabalho liberado automaticamente porque o agente nao confirmou a impressao.',
+                    'updated_at' => now(),
+                ]);
 
-            if (
-                $processingJob
-                && (!$processingJob->picked_at || $processingJob->picked_at <= $staleBefore)
-            ) {
-                DB::table('local_print_jobs')
-                    ->where('user_id', $userId)
-                    ->where('status', 'processing')
-                    ->where(function ($query) use ($staleBefore) {
-                        $query->whereNull('picked_at')->orWhere('picked_at', '<=', $staleBefore);
-                    })
-                    ->update([
-                        'status' => 'failed',
-                        'error_message' => 'Trabalho liberado automaticamente porque o agente nao confirmou a impressao.',
-                        'updated_at' => now(),
-                    ]);
+            $busyPrinters = DB::table('local_print_jobs')
+                ->where('user_id', $userId)
+                ->where('status', 'processing')
+                ->pluck('printer_name')
+                ->map(fn ($printer) => trim((string) $printer))
+                ->filter()
+                ->all();
 
-                $processingJob = DB::table('local_print_jobs')
-                    ->where('user_id', $userId)
-                    ->where('status', 'processing')
-                    ->orderBy('picked_at')
-                    ->orderBy('id')
-                    ->lockForUpdate()
-                    ->first();
-            }
-
-            if ($processingJob) {
-                return null;
-            }
-
-            $nextJob = DB::table('local_print_jobs')
+            $pendingJobs = DB::table('local_print_jobs')
                 ->where('user_id', $userId)
                 ->where('status', 'pending')
                 ->orderBy('created_at')
                 ->orderBy('id')
                 ->lockForUpdate()
-                ->first();
+                ->limit(500)
+                ->get();
 
-            if (!$nextJob) {
-                return null;
+            $selected = [];
+            foreach ($pendingJobs as $pendingJob) {
+                $printer = trim((string) $pendingJob->printer_name);
+                if ($printer === '' || in_array($printer, $busyPrinters, true)) {
+                    continue;
+                }
+                $selected[] = $pendingJob;
+                $busyPrinters[] = $printer;
+                if (count($selected) >= $limit) {
+                    break;
+                }
             }
 
-            DB::table('local_print_jobs')->where('id', $nextJob->id)->update([
-                'status' => 'processing',
-                'picked_at' => now(),
-                'updated_at' => now(),
-            ]);
+            foreach ($selected as $selectedJob) {
+                DB::table('local_print_jobs')->where('id', $selectedJob->id)->update([
+                    'status' => 'processing',
+                    'picked_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
 
-            return DB::table('local_print_jobs')->where('id', $nextJob->id)->first();
+            return array_map(
+                fn ($selectedJob) => DB::table('local_print_jobs')->where('id', $selectedJob->id)->first(),
+                $selected
+            );
         });
 
-        if (!$job) {
-            return response()->json(['job' => null]);
+        if (count($jobs) === 0) {
+            return response()->json(['job' => null, 'jobs' => []]);
         }
 
-        $mappedJob = $this->mapJob($job, true);
+        $mappedJobs = collect($jobs)->map(fn ($job) => $this->mapJob($job, true))->values();
 
         return response()->json([
-            'job' => $mappedJob,
-            'jobs' => [$mappedJob],
+            'job' => $mappedJobs->first(),
+            'jobs' => $mappedJobs,
         ]);
     }
 
