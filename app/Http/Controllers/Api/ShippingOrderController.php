@@ -121,9 +121,13 @@ final class ShippingOrderController
             $incomingRaw = is_array($row['row_raw'] ?? null) ? $row['row_raw'] : [];
             $currentRaw = $this->decodeJson($existing->row_raw) ?: [];
             $mergedRaw = $currentRaw;
+            $correctedColumnShift = (int) ($incomingRaw['column_shift_detected'] ?? 0) !== 0;
 
             foreach ($incomingRaw as $key => $value) {
-                if ((!array_key_exists($key, $mergedRaw) || $this->isBlank($mergedRaw[$key])) && !$this->isBlank($value)) {
+                if (
+                    !$this->isBlank($value)
+                    && ($correctedColumnShift || !array_key_exists($key, $mergedRaw) || $this->isBlank($mergedRaw[$key]))
+                ) {
                     $mergedRaw[$key] = $value;
                 }
             }
@@ -141,12 +145,12 @@ final class ShippingOrderController
             ] as $field) {
                 $current = $this->normalizeExistingShippingField($field, $existing->{$field});
                 $incoming = $this->normalizeIncomingShippingField($field, $row[$field] ?? null);
-                if ($this->isBlank($current) && !$this->isBlank($incoming)) {
+                if (!$this->isBlank($incoming) && ($correctedColumnShift || $this->isBlank($current))) {
                     $payload[$field] = $incoming;
                 }
             }
 
-            if (((int) $existing->product_qty) <= 0 && (int) ($row['product_qty'] ?? 0) > 0) {
+            if (($correctedColumnShift || ((int) $existing->product_qty) <= 0) && (int) ($row['product_qty'] ?? 0) > 0) {
                 $payload['product_qty'] = (int) $row['product_qty'];
             }
 
@@ -726,6 +730,11 @@ final class ShippingOrderController
                 if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
                     return $candidate;
                 }
+            }
+
+            $incomingRaw = is_array($incomingRow['row_raw'] ?? null) ? $incomingRow['row_raw'] : [];
+            if ((int) ($incomingRaw['column_shift_detected'] ?? 0) !== 0 && $candidates->count() === 1) {
+                return $candidates->first();
             }
 
             if ($incomingIdentity === '' && $candidates->isNotEmpty()) {
