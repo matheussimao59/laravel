@@ -52,6 +52,7 @@ final class ShippingOrderController
         $inserted = 0;
         $updated = 0;
         $unchanged = 0;
+        $removedBroken = 0;
 
         foreach ($rows as $row) {
             if (!is_array($row)) {
@@ -173,12 +174,15 @@ final class ShippingOrderController
             $updated++;
         }
 
+        $removedBroken = $this->removeBrokenImportsReplacedByCorrectedRows((int) $user->id, $rows);
+
         return response()->json([
             'message' => 'Importacao concluida.',
             'stats' => [
                 'inserted' => $inserted,
                 'updated' => $updated,
                 'unchanged' => $unchanged,
+                'removed_broken' => $removedBroken,
             ],
         ]);
     }
@@ -820,6 +824,36 @@ final class ShippingOrderController
     private function isPlaceholderAdName(mixed $value): bool
     {
         return trim((string) $value) === 'Produto sem titulo';
+    }
+
+    private function removeBrokenImportsReplacedByCorrectedRows(int $userId, array $rows): int
+    {
+        $correctedSourceFiles = collect($rows)
+            ->filter(function ($row) {
+                return is_array($row)
+                    && (int) data_get($row, 'row_raw.column_shift_detected', 0) !== 0
+                    && !$this->isBlank($row['source_file_name'] ?? null)
+                    && !$this->isBlank($row['ad_name'] ?? null);
+            })
+            ->pluck('source_file_name')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($correctedSourceFiles === []) {
+            return 0;
+        }
+
+        return DB::table('shipping_orders')
+            ->where('user_id', $userId)
+            ->whereIn('source_file_name', $correctedSourceFiles)
+            ->where(function ($query) {
+                $query
+                    ->whereNull('ad_name')
+                    ->orWhere('ad_name', '')
+                    ->orWhere('ad_name', 'Produto sem titulo');
+            })
+            ->delete();
     }
 
     private function normalizeImportedOrderNumber(string $value): string
