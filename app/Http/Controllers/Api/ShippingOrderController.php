@@ -59,6 +59,8 @@ final class ShippingOrderController
                 continue;
             }
 
+            $row = $this->normalizeOverdueImportedRow($row);
+
             $validator = Validator::make($row, [
                 'import_key' => ['required', 'string', 'max:190'],
                 'platform_order_number' => ['nullable', 'string', 'max:120'],
@@ -123,6 +125,7 @@ final class ShippingOrderController
             $currentRaw = $this->decodeJson($existing->row_raw) ?: [];
             $mergedRaw = $currentRaw;
             $correctedColumnShift = (int) ($incomingRaw['column_shift_detected'] ?? 0) !== 0;
+            $lateOrder = (bool) ($incomingRaw['late_order'] ?? false);
 
             foreach ($incomingRaw as $key => $value) {
                 if (
@@ -146,7 +149,10 @@ final class ShippingOrderController
             ] as $field) {
                 $current = $this->normalizeExistingShippingField($field, $existing->{$field});
                 $incoming = $this->normalizeIncomingShippingField($field, $row[$field] ?? null);
-                if (!$this->isBlank($incoming) && ($correctedColumnShift || $this->isBlank($current))) {
+                if (
+                    !$this->isBlank($incoming)
+                    && ($correctedColumnShift || ($lateOrder && $field === 'observations') || $this->isBlank($current))
+                ) {
                     $payload[$field] = $incoming;
                 }
             }
@@ -156,7 +162,7 @@ final class ShippingOrderController
             }
 
             $incomingShippingDeadline = $row['shipping_deadline'] ?? $this->shippingDeadlineFromRaw($incomingRaw);
-            if (!$existing->shipping_deadline && $incomingShippingDeadline) {
+            if (($lateOrder || !$existing->shipping_deadline) && $incomingShippingDeadline) {
                 $payload['shipping_deadline'] = $incomingShippingDeadline;
             }
 
@@ -824,6 +830,34 @@ final class ShippingOrderController
     private function isPlaceholderAdName(mixed $value): bool
     {
         return trim((string) $value) === 'Produto sem titulo';
+    }
+
+    private function normalizeOverdueImportedRow(array $row): array
+    {
+        $raw = is_array($row['row_raw'] ?? null) ? $row['row_raw'] : [];
+        $shippingDeadline = $row['shipping_deadline'] ?? $this->shippingDeadlineFromRaw($raw);
+        $today = now()->toDateString();
+
+        if (!$shippingDeadline || substr((string) $shippingDeadline, 0, 10) >= $today) {
+            return $row;
+        }
+
+        $originalShippingDeadline = substr((string) $shippingDeadline, 0, 10);
+        $observations = trim((string) ($row['observations'] ?? ''));
+        if (stripos($observations, 'Pedido atrasado') === false) {
+            $observations = implode(' | ', array_filter([$observations, 'Pedido atrasado']));
+        }
+
+        $row['shipping_deadline'] = $today;
+        $row['observations'] = $observations;
+        $row['row_raw'] = array_merge($raw, [
+            'shipping_deadline' => $today,
+            'observations' => $observations,
+            'original_shipping_deadline' => $originalShippingDeadline,
+            'late_order' => true,
+        ]);
+
+        return $row;
     }
 
     private function removeBrokenImportsReplacedByCorrectedRows(int $userId, array $rows): int
