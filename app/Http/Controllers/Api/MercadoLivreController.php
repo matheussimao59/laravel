@@ -202,6 +202,9 @@ final class MercadoLivreController
             'title' => ['sometimes', 'string', 'min:3', 'max:255'],
             'price' => ['sometimes', 'numeric', 'min:0.01'],
             'status' => ['sometimes', 'string', 'in:active,paused,closed'],
+            'available_quantity' => ['sometimes', 'integer', 'min:0'],
+            'seller_sku' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'description' => ['sometimes', 'nullable', 'string', 'max:50000'],
         ]);
 
         if ($validator->fails()) {

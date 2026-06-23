@@ -391,13 +391,34 @@ final class MercadoLivreService
         if (array_key_exists('status', $payload)) {
             $body['status'] = trim((string) $payload['status']);
         }
+        if (array_key_exists('available_quantity', $payload)) {
+            $body['available_quantity'] = max(0, (int) $payload['available_quantity']);
+        }
+        if (array_key_exists('seller_sku', $payload)) {
+            $body['attributes'] = [[
+                'id' => 'SELLER_SKU',
+                'value_name' => trim((string) $payload['seller_sku']),
+            ]];
+        }
 
-        if ($body === []) {
+        if ($body === [] && !array_key_exists('description', $payload)) {
             throw new ExternalServiceException('Nenhum campo valido para atualizar o anuncio.', 422);
         }
 
-        $this->request('/items/' . rawurlencode($itemId), $accessToken, 'PUT', $body);
+        if ($body !== []) {
+            $this->request('/items/' . rawurlencode($itemId), $accessToken, 'PUT', $body);
+        }
+
+        if (array_key_exists('description', $payload)) {
+            $this->request('/items/' . rawurlencode($itemId) . '/description', $accessToken, 'PUT', [
+                'plain_text' => (string) $payload['description'],
+            ]);
+        }
+
         $item = $this->request('/items/' . rawurlencode($itemId), $accessToken);
+        if (is_array($item)) {
+            $item['description'] = $this->fetchItemDescription($itemId, $accessToken);
+        }
 
         return $this->mapSellerProduct(is_array($item) ? $item : []);
     }
@@ -563,12 +584,26 @@ final class MercadoLivreService
             foreach (is_array($rows) ? $rows : [] as $row) {
                 $body = is_array($row['body'] ?? null) ? $row['body'] : [];
                 if ($body !== []) {
+                    $itemId = trim((string) ($body['id'] ?? ''));
+                    if ($itemId !== '') {
+                        $body['description'] = $this->fetchItemDescription($itemId, $accessToken);
+                    }
                     $items[] = $body;
                 }
             }
         }
 
         return $items;
+    }
+
+    private function fetchItemDescription(string $itemId, string $accessToken): string
+    {
+        try {
+            $payload = $this->request('/items/' . rawurlencode($itemId) . '/description', $accessToken);
+            return trim((string) ($payload['plain_text'] ?? $payload['text'] ?? ''));
+        } catch (ExternalServiceException) {
+            return '';
+        }
     }
 
     private function isInvalidAccessToken(ExternalServiceException $exception): bool
@@ -599,6 +634,7 @@ final class MercadoLivreService
             'permalink' => trim((string) ($item['permalink'] ?? '')),
             'thumbnail' => trim((string) ($item['thumbnail'] ?? '')),
             'seller_sku' => $sellerSku,
+            'description' => trim((string) ($item['description'] ?? '')),
             'category_id' => trim((string) ($item['category_id'] ?? '')),
             'listing_type_id' => trim((string) ($item['listing_type_id'] ?? '')),
             'date_created' => trim((string) ($item['date_created'] ?? '')),
