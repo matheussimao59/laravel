@@ -284,6 +284,69 @@ final class MercadoLivreService
         $account->save();
     }
 
+    public function sellerProductsForUser(User $user, int $limit = 50, int $offset = 0, string $status = 'active,paused,closed'): array
+    {
+        $accessToken = $this->accessTokenForUser($user);
+        $account = $user->mercadoLivreAccount()->first();
+        $seller = $this->sellerFromAccount($account);
+
+        if (!$seller || (int) ($seller['id'] ?? 0) <= 0) {
+            $seller = $this->request('/users/me', $accessToken);
+            if (is_array($seller)) {
+                $this->rememberSellerForUser($user, $seller);
+            }
+        }
+
+        $sellerId = (int) ($seller['id'] ?? 0);
+        if ($sellerId <= 0) {
+            throw new ExternalServiceException('Conta Mercado Livre sem seller valido.', 422);
+        }
+
+        $query = http_build_query([
+            'status' => $status,
+            'limit' => max(1, min(50, $limit)),
+            'offset' => max(0, $offset),
+        ]);
+        $search = $this->request("/users/{$sellerId}/items/search?{$query}", $accessToken);
+        $ids = array_values(array_filter(array_map('strval', is_array($search['results'] ?? null) ? $search['results'] : [])));
+        $items = $this->fetchItemsDetails($ids, $accessToken);
+
+        return [
+            'seller' => $seller,
+            'paging' => is_array($search['paging'] ?? null) ? $search['paging'] : [
+                'total' => count($ids),
+                'offset' => $offset,
+                'limit' => $limit,
+            ],
+            'products' => array_map(fn (array $item) => $this->mapSellerProduct($item), $items),
+        ];
+    }
+
+    public function updateSellerProductForUser(User $user, string $itemId, array $payload): array
+    {
+        $accessToken = $this->accessTokenForUser($user);
+        $body = [];
+
+        if (array_key_exists('title', $payload)) {
+            $body['title'] = trim((string) $payload['title']);
+        }
+        if (array_key_exists('price', $payload)) {
+            $body['price'] = round((float) $payload['price'], 2);
+        }
+        if (array_key_exists('status', $payload)) {
+            $body['status'] = trim((string) $payload['status']);
+        }
+
+        if ($body === []) {
+            throw new ExternalServiceException('Nenhum campo valido para atualizar o anuncio.', 422);
+        }
+
+        $this->request('/items/' . rawurlencode($itemId), $accessToken, 'PUT', $body);
+        $item = $this->request('/items/' . rawurlencode($itemId), $accessToken);
+
+        return $this->mapSellerProduct(is_array($item) ? $item : []);
+    }
+
     private function baseUrl(): string
     {
         return rtrim((string) config('services.mercado_livre.base_url', 'https://api.mercadolibre.com'), '/');
@@ -426,6 +489,60 @@ final class MercadoLivreService
         }
 
         return $thumbById;
+    }
+
+    private function fetchItemsDetails(array $itemIds, string $accessToken): array
+    {
+        $items = [];
+        $chunkSize = 20;
+
+        for ($i = 0; $i < count($itemIds); $i += $chunkSize) {
+            $chunk = array_slice($itemIds, $i, $chunkSize);
+            if ($chunk === []) {
+                continue;
+            }
+
+            $query = 'ids=' . implode(',', array_map('rawurlencode', $chunk));
+            $rows = $this->request('/items?' . $query, $accessToken);
+
+            foreach (is_array($rows) ? $rows : [] as $row) {
+                $body = is_array($row['body'] ?? null) ? $row['body'] : [];
+                if ($body !== []) {
+                    $items[] = $body;
+                }
+            }
+        }
+
+        return $items;
+    }
+
+    private function mapSellerProduct(array $item): array
+    {
+        $attributes = is_array($item['attributes'] ?? null) ? $item['attributes'] : [];
+        $sellerSku = '';
+        foreach ($attributes as $attribute) {
+            $id = strtoupper(trim((string) ($attribute['id'] ?? '')));
+            if (in_array($id, ['SELLER_SKU', 'SKU'], true)) {
+                $sellerSku = trim((string) ($attribute['value_name'] ?? $attribute['value_id'] ?? ''));
+                break;
+            }
+        }
+
+        return [
+            'id' => trim((string) ($item['id'] ?? '')),
+            'title' => trim((string) ($item['title'] ?? '')),
+            'price' => (float) ($item['price'] ?? 0),
+            'status' => trim((string) ($item['status'] ?? '')),
+            'available_quantity' => (int) ($item['available_quantity'] ?? 0),
+            'sold_quantity' => (int) ($item['sold_quantity'] ?? 0),
+            'permalink' => trim((string) ($item['permalink'] ?? '')),
+            'thumbnail' => trim((string) ($item['thumbnail'] ?? '')),
+            'seller_sku' => $sellerSku,
+            'category_id' => trim((string) ($item['category_id'] ?? '')),
+            'listing_type_id' => trim((string) ($item['listing_type_id'] ?? '')),
+            'date_created' => trim((string) ($item['date_created'] ?? '')),
+            'last_updated' => trim((string) ($item['last_updated'] ?? '')),
+        ];
     }
 
     private function findRequestVariantsOption(mixed $optionsPayload): ?string

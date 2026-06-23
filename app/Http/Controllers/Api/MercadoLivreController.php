@@ -158,6 +158,75 @@ final class MercadoLivreController
         }
     }
 
+    public function products(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'offset' => ['nullable', 'integer', 'min:0'],
+            'status' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Filtros invalidos para produtos Mercado Livre.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            /** @var User $user */
+            $user = $request->user();
+
+            return response()->json($this->service->sellerProductsForUser(
+                $user,
+                (int) $request->input('limit', 50),
+                (int) $request->input('offset', 0),
+                trim((string) $request->input('status', 'active,paused,closed')) ?: 'active,paused,closed',
+            ));
+        } catch (ExternalServiceException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'details' => $exception->details(),
+            ], $exception->status());
+        }
+    }
+
+    public function syncProducts(Request $request): JsonResponse
+    {
+        return $this->products($request);
+    }
+
+    public function updateProduct(Request $request, string $itemId): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'title' => ['sometimes', 'string', 'min:3', 'max:255'],
+            'price' => ['sometimes', 'numeric', 'min:0.01'],
+            'status' => ['sometimes', 'string', 'in:active,paused,closed'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Dados invalidos para atualizar anuncio Mercado Livre.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            /** @var User $user */
+            $user = $request->user();
+
+            return response()->json([
+                'product' => $this->service->updateSellerProductForUser($user, $itemId, $validator->validated()),
+                'message' => 'Anuncio atualizado no Mercado Livre.',
+            ]);
+        } catch (ExternalServiceException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'details' => $exception->details(),
+            ], $exception->status());
+        }
+    }
+
     public function account(Request $request): JsonResponse
     {
         /** @var User $user */

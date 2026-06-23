@@ -108,6 +108,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/account', [MercadoLivreController::class, 'disconnect']);
         Route::post('/oauth/token', [MercadoLivreController::class, 'oauthToken']);
         Route::post('/sync', [MercadoLivreController::class, 'sync']);
+        Route::get('/products', [MercadoLivreController::class, 'products']);
+        Route::post('/products/sync', [MercadoLivreController::class, 'syncProducts']);
+        Route::patch('/products/{itemId}', [MercadoLivreController::class, 'updateProduct']);
         Route::post('/customization', [MercadoLivreController::class, 'sendCustomization']);
     });
 
