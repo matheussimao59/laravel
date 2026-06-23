@@ -42,6 +42,48 @@ final class MercadoLivreService
         return $this->decodeResponse($response, 'ml_token_exchange_failed');
     }
 
+    private function refreshAccountToken(MercadoLivreAccount $account): string
+    {
+        ['client_id' => $clientId, 'client_secret' => $clientSecret] = $this->oauthCredentials();
+        $refreshToken = trim((string) $account->refresh_token);
+
+        if ($clientId === '' || $clientSecret === '' || $refreshToken === '') {
+            throw new ExternalServiceException('Sessao do Mercado Livre expirada. Reconecte sua conta.', 401);
+        }
+
+        $response = Http::asForm()
+            ->acceptJson()
+            ->post($this->baseUrl() . '/oauth/token', [
+                'grant_type' => 'refresh_token',
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'refresh_token' => $refreshToken,
+            ]);
+
+        $payload = $this->decodeResponse($response, 'ml_token_refresh_failed');
+        $expiresIn = max(0, (int) ($payload['expires_in'] ?? 0));
+        $refreshExpiresIn = max(0, (int) ($payload['refresh_token_expires_in'] ?? 0));
+
+        $account->access_token = trim((string) ($payload['access_token'] ?? ''));
+        if (trim((string) ($payload['refresh_token'] ?? '')) !== '') {
+            $account->refresh_token = trim((string) $payload['refresh_token']);
+        }
+        $account->token_type = trim((string) ($payload['token_type'] ?? $account->token_type ?? ''));
+        $account->scope = trim((string) ($payload['scope'] ?? $account->scope ?? ''));
+        $account->expires_at = $expiresIn > 0 ? now()->addSeconds($expiresIn) : null;
+        if ($refreshExpiresIn > 0) {
+            $account->refresh_expires_at = now()->addSeconds($refreshExpiresIn);
+        }
+        $account->save();
+
+        $token = trim((string) $account->access_token);
+        if ($token === '') {
+            throw new ExternalServiceException('Mercado Livre nao retornou um token valido. Reconecte sua conta.', 401);
+        }
+
+        return $token;
+    }
+
     public function sendCustomization(
         string $accessToken,
         int $sellerId,
@@ -257,13 +299,17 @@ final class MercadoLivreService
         $user->mercadoLivreAccount()->delete();
     }
 
-    public function accessTokenForUser(User $user): string
+    public function accessTokenForUser(User $user, bool $forceRefresh = false): string
     {
         $account = $user->mercadoLivreAccount()->first();
         $token = trim((string) ($account?->access_token ?? ''));
 
         if ($token === '') {
             throw new ExternalServiceException('Conta Mercado Livre nao conectada para este usuario.', 422);
+        }
+
+        if ($account && ($forceRefresh || ($account->expires_at && $account->expires_at->subMinutes(5)->isPast()))) {
+            return $this->refreshAccountToken($account);
         }
 
         return $token;
@@ -284,42 +330,51 @@ final class MercadoLivreService
         $account->save();
     }
 
-    public function sellerProductsForUser(User $user, int $limit = 50, int $offset = 0, string $status = 'active,paused,closed'): array
+    public function sellerProductsForUser(User $user, int $limit = 50, int $offset = 0, string $status = 'active,paused,closed', bool $retried = false): array
     {
         $accessToken = $this->accessTokenForUser($user);
         $account = $user->mercadoLivreAccount()->first();
         $seller = $this->sellerFromAccount($account);
 
-        if (!$seller || (int) ($seller['id'] ?? 0) <= 0) {
-            $seller = $this->request('/users/me', $accessToken);
-            if (is_array($seller)) {
-                $this->rememberSellerForUser($user, $seller);
+        try {
+            if (!$seller || (int) ($seller['id'] ?? 0) <= 0) {
+                $seller = $this->request('/users/me', $accessToken);
+                if (is_array($seller)) {
+                    $this->rememberSellerForUser($user, $seller);
+                }
             }
+
+            $sellerId = (int) ($seller['id'] ?? 0);
+            if ($sellerId <= 0) {
+                throw new ExternalServiceException('Conta Mercado Livre sem seller valido.', 422);
+            }
+
+            $query = http_build_query([
+                'status' => $status,
+                'limit' => max(1, min(50, $limit)),
+                'offset' => max(0, $offset),
+            ]);
+            $search = $this->request("/users/{$sellerId}/items/search?{$query}", $accessToken);
+            $ids = array_values(array_filter(array_map('strval', is_array($search['results'] ?? null) ? $search['results'] : [])));
+            $items = $this->fetchItemsDetails($ids, $accessToken);
+
+            return [
+                'seller' => $seller,
+                'paging' => is_array($search['paging'] ?? null) ? $search['paging'] : [
+                    'total' => count($ids),
+                    'offset' => $offset,
+                    'limit' => $limit,
+                ],
+                'products' => array_map(fn (array $item) => $this->mapSellerProduct($item), $items),
+            ];
+        } catch (ExternalServiceException $exception) {
+            if (!$retried && $this->isInvalidAccessToken($exception)) {
+                $this->accessTokenForUser($user, true);
+                return $this->sellerProductsForUser($user, $limit, $offset, $status, true);
+            }
+
+            throw $exception;
         }
-
-        $sellerId = (int) ($seller['id'] ?? 0);
-        if ($sellerId <= 0) {
-            throw new ExternalServiceException('Conta Mercado Livre sem seller valido.', 422);
-        }
-
-        $query = http_build_query([
-            'status' => $status,
-            'limit' => max(1, min(50, $limit)),
-            'offset' => max(0, $offset),
-        ]);
-        $search = $this->request("/users/{$sellerId}/items/search?{$query}", $accessToken);
-        $ids = array_values(array_filter(array_map('strval', is_array($search['results'] ?? null) ? $search['results'] : [])));
-        $items = $this->fetchItemsDetails($ids, $accessToken);
-
-        return [
-            'seller' => $seller,
-            'paging' => is_array($search['paging'] ?? null) ? $search['paging'] : [
-                'total' => count($ids),
-                'offset' => $offset,
-                'limit' => $limit,
-            ],
-            'products' => array_map(fn (array $item) => $this->mapSellerProduct($item), $items),
-        ];
     }
 
     public function updateSellerProductForUser(User $user, string $itemId, array $payload): array
@@ -514,6 +569,12 @@ final class MercadoLivreService
         }
 
         return $items;
+    }
+
+    private function isInvalidAccessToken(ExternalServiceException $exception): bool
+    {
+        $text = strtolower($exception->getMessage() . ' ' . json_encode($exception->details(), JSON_UNESCAPED_UNICODE));
+        return str_contains($text, 'invalid access token') || str_contains($text, 'unauthorized');
     }
 
     private function mapSellerProduct(array $item): array
