@@ -11,10 +11,6 @@ use Illuminate\Support\Facades\Validator;
 
 final class PdfTranslationController
 {
-    public function __construct(private readonly PdfTranslationService $service)
-    {
-    }
-
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -60,12 +56,12 @@ final class PdfTranslationController
             'target_language' => 'english',
         ]);
 
-        $job = $this->service->process($job);
+        $this->processAfterResponse((int) $job->id);
 
         return response()->json([
-            'message' => $job->status === 'completed' ? 'PDF traduzido com sucesso.' : 'Falha ao traduzir PDF.',
+            'message' => 'PDF recebido. A traducao foi enviada para processamento.',
             'job' => $this->mapJob($job),
-        ], $job->status === 'completed' ? 201 : 422);
+        ], 201);
     }
 
     public function retry(Request $request, PdfTranslationJob $job): JsonResponse
@@ -75,12 +71,19 @@ final class PdfTranslationController
             return response()->json(['message' => 'Arquivo nao encontrado.'], 404);
         }
 
-        $job = $this->service->process($job);
+        $job->update([
+            'status' => 'pending',
+            'error_message' => null,
+            'translated_path' => null,
+            'processed_at' => null,
+        ]);
+
+        $this->processAfterResponse((int) $job->id);
 
         return response()->json([
-            'message' => $job->status === 'completed' ? 'PDF traduzido com sucesso.' : 'Falha ao traduzir PDF.',
-            'job' => $this->mapJob($job),
-        ], $job->status === 'completed' ? 200 : 422);
+            'message' => 'PDF enviado para processamento novamente.',
+            'job' => $this->mapJob($job->fresh() ?: $job),
+        ]);
     }
 
     public function download(Request $request, PdfTranslationJob $job, string $type)
@@ -130,5 +133,17 @@ final class PdfTranslationController
             'processed_at' => optional($job->processed_at)->toISOString(),
             'has_translated_file' => (bool) $job->translated_path,
         ];
+    }
+
+    private function processAfterResponse(int $jobId): void
+    {
+        app()->terminating(function () use ($jobId): void {
+            $job = PdfTranslationJob::find($jobId);
+            if (!$job) {
+                return;
+            }
+
+            app(PdfTranslationService::class)->process($job);
+        });
     }
 }
