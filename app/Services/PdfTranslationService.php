@@ -19,22 +19,30 @@ final class PdfTranslationService
 
         try {
             $sourcePath = Storage::disk('public')->path($job->original_path);
-            $text = $this->extractText($sourcePath);
+            $mode = 'text-layer';
 
-            if (trim($text) === '') {
-                throw new ExternalServiceException('Nao foi possivel extrair texto do PDF. Se for PDF escaneado, sera necessario OCR.', 422);
-            }
+            try {
+                $text = $this->extractText($sourcePath);
 
-            $pages = $this->splitPages($text);
-            $translatedPages = [];
-            $spanishBlocks = 0;
-
-            foreach ($pages as $pageNumber => $pageText) {
-                $translated = $this->translateSpanishOnly($pageText, $pageNumber + 1);
-                if (trim($translated) !== trim($pageText)) {
-                    $spanishBlocks++;
+                if (trim($text) === '') {
+                    throw new ExternalServiceException('Nao foi possivel extrair texto do PDF. Tentando leitura visual com OpenAI.', 422);
                 }
-                $translatedPages[] = $translated;
+
+                $pages = $this->splitPages($text);
+                $translatedPages = [];
+                $spanishBlocks = 0;
+
+                foreach ($pages as $pageNumber => $pageText) {
+                    $translated = $this->translateSpanishOnly($pageText, $pageNumber + 1);
+                    if (trim($translated) !== trim($pageText)) {
+                        $spanishBlocks++;
+                    }
+                    $translatedPages[] = $translated;
+                }
+            } catch (ExternalServiceException) {
+                $mode = 'openai-pdf-vision';
+                $translatedPages = $this->translatePdfDirectly($sourcePath, $job->original_name);
+                $spanishBlocks = count($translatedPages);
             }
 
             $translatedPath = 'pdf-translations/translated/' . $job->user_id . '/' . Str::uuid() . '.pdf';
@@ -47,7 +55,7 @@ final class PdfTranslationService
                 'spanish_blocks' => $spanishBlocks,
                 'processed_at' => now(),
                 'meta' => [
-                    'mode' => 'text-layer',
+                    'mode' => $mode,
                     'note' => 'PDF traduzido gerado a partir do texto extraido. O arquivo original foi mantido intacto.',
                 ],
             ]);
@@ -301,6 +309,71 @@ final class PdfTranslationService
         }
 
         return trim($output);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function translatePdfDirectly(string $sourcePath, string $filename): array
+    {
+        $apiKey = trim((string) config('services.openai.api_key'));
+        if ($apiKey === '') {
+            throw new ExternalServiceException('OPENAI_API_KEY nao configurada no servidor.', 500);
+        }
+
+        $pdf = file_get_contents($sourcePath);
+        if ($pdf === false || $pdf === '') {
+            throw new ExternalServiceException('Nao foi possivel abrir o PDF para enviar a OpenAI.', 422);
+        }
+
+        $baseUrl = rtrim((string) config('services.openai.base_url', 'https://api.openai.com/v1'), '/');
+        $model = (string) config('services.openai.model', 'gpt-5-mini');
+
+        $response = Http::withToken($apiKey)
+            ->timeout(300)
+            ->acceptJson()
+            ->post($baseUrl . '/responses', [
+                'model' => $model,
+                'input' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'input_file',
+                                'filename' => $filename ?: 'documento.pdf',
+                                'file_data' => 'data:application/pdf;base64,' . base64_encode($pdf),
+                            ],
+                            [
+                                'type' => 'input_text',
+                                'text' => implode("\n", [
+                                    'Read this PDF, including text and page images.',
+                                    'Translate only Spanish text into English.',
+                                    'Keep Portuguese and every other language exactly as written.',
+                                    'Preserve numbers, names, codes and line breaks as much as possible.',
+                                    'Return only the translated document text.',
+                                    'When a page ends, write a line containing exactly: ---PAGE_BREAK---',
+                                ]),
+                            ],
+                        ],
+                    ],
+                ],
+            ]);
+
+        if (!$response->successful()) {
+            $message = (string) ($response->json('error.message') ?: $response->body());
+            throw new ExternalServiceException('Falha na leitura visual da OpenAI: ' . $message, $response->status());
+        }
+
+        $payload = $response->json();
+        $output = $this->extractOpenAiText(is_array($payload) ? $payload : []);
+        if (trim($output) === '') {
+            throw new ExternalServiceException('OpenAI nao retornou texto do PDF.', 502);
+        }
+
+        $pages = preg_split('/^\s*---PAGE_BREAK---\s*$/m', trim($output)) ?: [$output];
+        $pages = array_values(array_filter(array_map('trim', $pages), fn (string $page) => $page !== ''));
+
+        return $pages === [] ? [trim($output)] : $pages;
     }
 
     /**
