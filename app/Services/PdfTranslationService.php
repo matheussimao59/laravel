@@ -25,24 +25,23 @@ final class PdfTranslationService
                 $text = $this->extractText($sourcePath);
 
                 if (trim($text) === '') {
-                    throw new ExternalServiceException('Nao foi possivel extrair texto do PDF. Tentando leitura visual com OpenAI.', 422);
-                }
-
-                $pages = $this->splitPages($text);
-                $translatedPages = [];
-                $spanishBlocks = 0;
-
-                foreach ($pages as $pageNumber => $pageText) {
-                    $translated = $this->translateSpanishOnly($pageText, $pageNumber + 1);
-                    if (trim($translated) !== trim($pageText)) {
-                        $spanishBlocks++;
-                    }
-                    $translatedPages[] = $translated;
+                    throw new ExternalServiceException('Nao foi possivel extrair texto do PDF.', 422);
                 }
             } catch (ExternalServiceException) {
-                $mode = 'openai-pdf-vision';
-                $translatedPages = $this->translatePdfDirectly($sourcePath, $job->original_name);
-                $spanishBlocks = count($translatedPages);
+                $mode = 'local-ocr';
+                $text = $this->extractTextWithOcr($sourcePath);
+            }
+
+            $pages = $this->splitPages($text);
+            $translatedPages = [];
+            $spanishBlocks = 0;
+
+            foreach ($pages as $pageNumber => $pageText) {
+                $translated = $this->translateSpanishOnly($pageText, $pageNumber + 1);
+                if (trim($translated) !== trim($pageText)) {
+                    $spanishBlocks++;
+                }
+                $translatedPages[] = $translated;
             }
 
             $translatedPath = 'pdf-translations/translated/' . $job->user_id . '/' . Str::uuid() . '.pdf';
@@ -72,36 +71,19 @@ final class PdfTranslationService
 
     private function extractText(string $sourcePath): string
     {
-        if (!function_exists('proc_open')) {
-            return $this->extractTextWithPhp($sourcePath);
-        }
-
         $binary = trim((string) config('services.pdf_tools.pdftotext_binary', 'pdftotext')) ?: 'pdftotext';
         $command = $this->escapeCommand($binary) . ' -layout -enc UTF-8 ' . escapeshellarg($sourcePath) . ' -';
 
-        $descriptors = [
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
-        $process = proc_open($command, $descriptors, $pipes);
-        if (!is_resource($process)) {
-            throw new ExternalServiceException('Nao foi possivel iniciar o extrator de PDF.', 500);
+        try {
+            $result = $this->runCommand($command);
+            if ($result['exit_code'] === 0 && trim($result['output']) !== '') {
+                return $result['output'];
+            }
+        } catch (ExternalServiceException) {
+            // Continua para o extrator PHP simples antes de tentar OCR.
         }
 
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        $stderr = stream_get_contents($pipes[2]) ?: '';
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-
-        if ($exitCode !== 0) {
-            throw new ExternalServiceException(
-                'Falha ao ler PDF. Instale poppler-utils no servidor ou configure PDFTOTEXT_BINARY. ' . trim($stderr),
-                422
-            );
-        }
-
-        return $stdout;
+        return $this->extractTextWithPhp($sourcePath);
     }
 
     private function extractTextWithPhp(string $sourcePath): string
@@ -128,6 +110,49 @@ final class PdfTranslationService
         }
 
         return implode("\f", $pages);
+    }
+
+    private function extractTextWithOcr(string $sourcePath): string
+    {
+        $workDir = storage_path('app/pdf-translation-work/' . Str::uuid());
+        if (!is_dir($workDir) && !mkdir($workDir, 0775, true) && !is_dir($workDir)) {
+            throw new ExternalServiceException('Nao foi possivel criar pasta temporaria para OCR.', 500);
+        }
+
+        try {
+            $pdftoppm = $this->escapeCommand(trim((string) config('services.pdf_tools.pdftoppm_binary', 'pdftoppm')) ?: 'pdftoppm');
+            $tesseract = $this->escapeCommand(trim((string) config('services.pdf_tools.tesseract_binary', 'tesseract')) ?: 'tesseract');
+            $prefix = $workDir . DIRECTORY_SEPARATOR . 'page';
+
+            $convert = $this->runCommand($pdftoppm . ' -png -r 180 ' . escapeshellarg($sourcePath) . ' ' . escapeshellarg($prefix));
+            if ($convert['exit_code'] !== 0) {
+                throw new ExternalServiceException('Falha ao converter PDF para imagem. Instale poppler-utils. ' . trim($convert['output']), 422);
+            }
+
+            $images = glob($prefix . '-*.png') ?: [];
+            sort($images, SORT_NATURAL);
+            if ($images === []) {
+                throw new ExternalServiceException('OCR nao encontrou paginas convertidas do PDF.', 422);
+            }
+
+            $pages = [];
+            foreach ($images as $image) {
+                $ocr = $this->runCommand($tesseract . ' ' . escapeshellarg($image) . ' stdout -l spa+por+eng --psm 6');
+                if ($ocr['exit_code'] !== 0) {
+                    throw new ExternalServiceException('Falha no OCR com Tesseract. Instale tesseract-ocr-spa. ' . trim($ocr['output']), 422);
+                }
+                $pages[] = trim($ocr['output']);
+            }
+
+            $text = trim(implode("\f", array_filter($pages, fn (string $page) => trim($page) !== '')));
+            if ($text === '') {
+                throw new ExternalServiceException('OCR terminou, mas nao encontrou texto legivel no PDF.', 422);
+            }
+
+            return $text;
+        } finally {
+            $this->deleteDirectory($workDir);
+        }
     }
 
     /**
@@ -259,6 +284,78 @@ final class PdfTranslationService
     }
 
     /**
+     * @return array{exit_code:int, output:string}
+     */
+    private function runCommand(string $command): array
+    {
+        if (function_exists('proc_open')) {
+            $descriptors = [
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ];
+            $process = proc_open($command, $descriptors, $pipes);
+            if (!is_resource($process)) {
+                throw new ExternalServiceException('Nao foi possivel iniciar comando local.', 500);
+            }
+
+            $stdout = stream_get_contents($pipes[1]) ?: '';
+            $stderr = stream_get_contents($pipes[2]) ?: '';
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $exitCode = proc_close($process);
+
+            return [
+                'exit_code' => (int) $exitCode,
+                'output' => trim($stdout . "\n" . $stderr),
+            ];
+        }
+
+        if (function_exists('shell_exec')) {
+            $marker = '__PDF_TRANSLATION_EXIT__';
+            $output = shell_exec($command . ' 2>&1; printf "\n' . $marker . '%s" "$?"');
+            $output = (string) $output;
+            $exitCode = 0;
+            if (preg_match('/' . preg_quote($marker, '/') . '(\d+)\s*$/', $output, $match)) {
+                $exitCode = (int) $match[1];
+                $output = preg_replace('/\s*' . preg_quote($marker, '/') . '\d+\s*$/', '', $output) ?? $output;
+            }
+
+            return [
+                'exit_code' => $exitCode,
+                'output' => trim($output),
+            ];
+        }
+
+        throw new ExternalServiceException(
+            'O servidor bloqueou execucao de comandos PHP. Para usar Argos + Tesseract, habilite proc_open ou shell_exec no PHP.',
+            500
+        );
+    }
+
+    private function deleteDirectory(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $items = scandir($path) ?: [];
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+
+            $target = $path . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($target)) {
+                $this->deleteDirectory($target);
+            } else {
+                @unlink($target);
+            }
+        }
+
+        @rmdir($path);
+    }
+
+    /**
      * @return array<int, string>
      */
     private function splitPages(string $text): array
@@ -272,6 +369,10 @@ final class PdfTranslationService
 
     private function translateSpanishOnly(string $text, int $pageNumber): string
     {
+        if ($this->translationProvider() === 'argos') {
+            return $this->translateWithArgos($text);
+        }
+
         $apiKey = trim((string) config('services.openai.api_key'));
         if ($apiKey === '') {
             throw new ExternalServiceException('OPENAI_API_KEY nao configurada no servidor.', 500);
@@ -309,6 +410,67 @@ final class PdfTranslationService
         }
 
         return trim($output);
+    }
+
+    private function translationProvider(): string
+    {
+        return strtolower(trim((string) config('services.pdf_tools.translator', 'argos'))) ?: 'argos';
+    }
+
+    private function translateWithArgos(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        $workDir = storage_path('app/pdf-translation-work/' . Str::uuid());
+        if (!is_dir($workDir) && !mkdir($workDir, 0775, true) && !is_dir($workDir)) {
+            throw new ExternalServiceException('Nao foi possivel criar pasta temporaria para traducao local.', 500);
+        }
+
+        try {
+            $inputPath = $workDir . DIRECTORY_SEPARATOR . 'input.txt';
+            $outputPath = $workDir . DIRECTORY_SEPARATOR . 'output.txt';
+            file_put_contents($inputPath, $text);
+
+            $python = $this->escapeCommand(trim((string) config('services.pdf_tools.python_binary', 'python3')) ?: 'python3');
+            $script = <<<'PY'
+import sys
+try:
+    import argostranslate.translate
+except Exception as exc:
+    sys.stderr.write("Argos Translate nao instalado: " + str(exc))
+    sys.exit(20)
+
+source, target, input_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(input_path, "r", encoding="utf-8", errors="ignore") as handle:
+    text = handle.read()
+try:
+    translated = argostranslate.translate.translate(text, source, target)
+except Exception as exc:
+    sys.stderr.write("Falha no Argos Translate: " + str(exc))
+    sys.exit(21)
+with open(output_path, "w", encoding="utf-8") as handle:
+    handle.write(translated)
+PY;
+            $scriptPath = $workDir . DIRECTORY_SEPARATOR . 'translate.py';
+            file_put_contents($scriptPath, $script);
+
+            $result = $this->runCommand($python . ' ' . escapeshellarg($scriptPath) . ' es en ' . escapeshellarg($inputPath) . ' ' . escapeshellarg($outputPath));
+            if ($result['exit_code'] !== 0) {
+                throw new ExternalServiceException('Falha na traducao local Argos. ' . trim($result['output']), 422);
+            }
+
+            $translated = file_exists($outputPath) ? (string) file_get_contents($outputPath) : '';
+            if (trim($translated) === '') {
+                throw new ExternalServiceException('Argos Translate nao retornou texto traduzido.', 422);
+            }
+
+            return trim($translated);
+        } finally {
+            $this->deleteDirectory($workDir);
+        }
     }
 
     /**
