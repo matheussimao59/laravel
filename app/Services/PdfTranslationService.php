@@ -64,6 +64,10 @@ final class PdfTranslationService
 
     private function extractText(string $sourcePath): string
     {
+        if (!function_exists('proc_open')) {
+            return $this->extractTextWithPhp($sourcePath);
+        }
+
         $binary = trim((string) config('services.pdf_tools.pdftotext_binary', 'pdftotext')) ?: 'pdftotext';
         $command = $this->escapeCommand($binary) . ' -layout -enc UTF-8 ' . escapeshellarg($sourcePath) . ' -';
 
@@ -90,6 +94,151 @@ final class PdfTranslationService
         }
 
         return $stdout;
+    }
+
+    private function extractTextWithPhp(string $sourcePath): string
+    {
+        $pdf = file_get_contents($sourcePath);
+        if ($pdf === false || $pdf === '') {
+            throw new ExternalServiceException('Nao foi possivel abrir o PDF enviado.', 422);
+        }
+
+        $streams = $this->extractPdfStreams($pdf);
+        $pages = [];
+        foreach ($streams as $stream) {
+            $text = $this->extractTextFromPdfContent($stream);
+            if (trim($text) !== '') {
+                $pages[] = trim($text);
+            }
+        }
+
+        if ($pages === []) {
+            throw new ExternalServiceException(
+                'Nao foi possivel extrair texto do PDF neste servidor. A funcao proc_open esta bloqueada e este PDF parece escaneado, protegido ou comprimido de forma nao suportada. Para melhor leitura, habilite proc_open ou use OCR.',
+                422
+            );
+        }
+
+        return implode("\f", $pages);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractPdfStreams(string $pdf): array
+    {
+        preg_match_all('/<<(.*?)>>\s*stream\r?\n(.*?)\r?\nendstream/s', $pdf, $matches, PREG_SET_ORDER);
+        $streams = [];
+
+        foreach ($matches as $match) {
+            $dictionary = $match[1] ?? '';
+            $stream = $match[2] ?? '';
+            if (str_contains($dictionary, '/FlateDecode')) {
+                $decoded = @gzuncompress($stream);
+                if ($decoded === false) {
+                    $decoded = @gzdecode($stream);
+                }
+                if ($decoded === false) {
+                    $decoded = @gzinflate($stream);
+                }
+                if ($decoded !== false) {
+                    $stream = $decoded;
+                }
+            }
+
+            if (str_contains($stream, 'Tj') || str_contains($stream, 'TJ')) {
+                $streams[] = $stream;
+            }
+        }
+
+        return $streams;
+    }
+
+    private function extractTextFromPdfContent(string $content): string
+    {
+        $chunks = [];
+
+        preg_match_all('/\((?:\\\\.|[^\\\\()])*\)\s*Tj/s', $content, $literalMatches);
+        foreach ($literalMatches[0] ?? [] as $operator) {
+            if (preg_match('/\((.*)\)\s*Tj/s', $operator, $match)) {
+                $chunks[] = $this->decodePdfLiteralString($match[1]);
+            }
+        }
+
+        preg_match_all('/\[(.*?)\]\s*TJ/s', $content, $arrayMatches);
+        foreach ($arrayMatches[1] ?? [] as $arrayContent) {
+            preg_match_all('/\((?:\\\\.|[^\\\\()])*\)|<[0-9A-Fa-f\s]+>/', $arrayContent, $parts);
+            $line = '';
+            foreach ($parts[0] ?? [] as $part) {
+                if (str_starts_with($part, '(')) {
+                    $line .= $this->decodePdfLiteralString(substr($part, 1, -1));
+                } elseif (str_starts_with($part, '<')) {
+                    $line .= $this->decodePdfHexString($part);
+                }
+            }
+            if (trim($line) !== '') {
+                $chunks[] = $line;
+            }
+        }
+
+        preg_match_all('/<[0-9A-Fa-f\s]+>\s*Tj/s', $content, $hexMatches);
+        foreach ($hexMatches[0] ?? [] as $operator) {
+            if (preg_match('/(<[0-9A-Fa-f\s]+>)\s*Tj/s', $operator, $match)) {
+                $chunks[] = $this->decodePdfHexString($match[1]);
+            }
+        }
+
+        return trim(implode("\n", array_filter($chunks, fn (string $chunk) => trim($chunk) !== '')));
+    }
+
+    private function decodePdfLiteralString(string $value): string
+    {
+        $value = preg_replace_callback('/\\\\([nrtbf\\\\()])/', function (array $match): string {
+            return match ($match[1]) {
+                'n' => "\n",
+                'r' => "\r",
+                't' => "\t",
+                'b' => "\b",
+                'f' => "\f",
+                default => $match[1],
+            };
+        }, $value) ?? $value;
+
+        $value = preg_replace_callback('/\\\\([0-7]{1,3})/', fn (array $match): string => chr(octdec($match[1])), $value) ?? $value;
+
+        return $this->normalizeExtractedText($value);
+    }
+
+    private function decodePdfHexString(string $value): string
+    {
+        $hex = preg_replace('/[^0-9A-Fa-f]/', '', $value) ?? '';
+        if ($hex === '') {
+            return '';
+        }
+        if (strlen($hex) % 2 === 1) {
+            $hex .= '0';
+        }
+
+        $binary = hex2bin($hex);
+        if ($binary === false) {
+            return '';
+        }
+
+        if (str_starts_with($binary, "\xFE\xFF")) {
+            $decoded = @mb_convert_encoding(substr($binary, 2), 'UTF-8', 'UTF-16BE');
+            return $this->normalizeExtractedText($decoded ?: '');
+        }
+
+        return $this->normalizeExtractedText($binary);
+    }
+
+    private function normalizeExtractedText(string $value): string
+    {
+        $decoded = @mb_convert_encoding($value, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1252');
+        $value = $decoded ?: $value;
+        $value = preg_replace('/[^\P{C}\r\n\t]+/u', '', $value) ?? $value;
+
+        return trim($value);
     }
 
     private function escapeCommand(string $binary): string
