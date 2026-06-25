@@ -438,6 +438,7 @@ final class PdfTranslationService
             $script = <<<'PY'
 import sys
 try:
+    import argostranslate.package
     import argostranslate.translate
 except Exception as exc:
     sys.stderr.write("Argos Translate nao instalado: " + str(exc))
@@ -447,7 +448,31 @@ source, target, input_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3],
 with open(input_path, "r", encoding="utf-8", errors="ignore") as handle:
     text = handle.read()
 try:
-    translated = argostranslate.translate.translate(text, source, target)
+    installed_languages = argostranslate.translate.get_installed_languages()
+    from_lang = next((lang for lang in installed_languages if lang.code == source), None)
+    to_lang = next((lang for lang in installed_languages if lang.code == target), None)
+    translation = from_lang.get_translation(to_lang) if from_lang and to_lang else None
+
+    if translation is None:
+        argostranslate.package.update_package_index()
+        packages = argostranslate.package.get_available_packages()
+        package = next((pkg for pkg in packages if pkg.from_code == source and pkg.to_code == target), None)
+        if package is None:
+            sys.stderr.write("Modelo Argos es -> en nao encontrado no indice de pacotes.")
+            sys.exit(22)
+        package_path = package.download()
+        argostranslate.package.install_from_path(package_path)
+
+        installed_languages = argostranslate.translate.get_installed_languages()
+        from_lang = next((lang for lang in installed_languages if lang.code == source), None)
+        to_lang = next((lang for lang in installed_languages if lang.code == target), None)
+        translation = from_lang.get_translation(to_lang) if from_lang and to_lang else None
+
+    if translation is None:
+        sys.stderr.write("Modelo Argos es -> en nao instalado ou nao carregado.")
+        sys.exit(23)
+
+    translated = translation.translate(text)
 except Exception as exc:
     sys.stderr.write("Falha no Argos Translate: " + str(exc))
     sys.exit(21)
