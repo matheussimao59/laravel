@@ -54,4 +54,8 @@ return [
         'model' => env('OPENAI_MODEL', 'gpt-5-mini'),
     ],
 
+    'pdf_tools' => [
+        'pdftotext_binary' => env('PDFTOTEXT_BINARY', 'pdftotext'),
+    ],
+
 ];
