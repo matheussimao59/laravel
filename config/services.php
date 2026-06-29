@@ -54,12 +54,4 @@ return [
         'model' => env('OPENAI_MODEL', 'gpt-5-mini'),
     ],
 
-    'pdf_tools' => [
-        'translator' => env('PDF_TRANSLATOR', 'argos'),
-        'pdftotext_binary' => env('PDFTOTEXT_BINARY', 'pdftotext'),
-        'pdftoppm_binary' => env('PDFTOPPM_BINARY', 'pdftoppm'),
-        'tesseract_binary' => env('TESSERACT_BINARY', 'tesseract'),
-        'python_binary' => env('PYTHON_BINARY', 'python3'),
-    ],
-
 ];
