@@ -67,6 +67,7 @@ final class MercadoLivreController
             'to_date' => ['nullable', 'string'],
             'include_payments_details' => ['nullable', 'boolean'],
             'include_shipments_details' => ['nullable', 'boolean'],
+            'include_item_thumbnails' => ['nullable', 'boolean'],
             'max_pages' => ['nullable', 'integer', 'min:1', 'max:500'],
         ]);
 
@@ -98,6 +99,8 @@ final class MercadoLivreController
                 $request->boolean('include_payments_details'),
                 $request->boolean('include_shipments_details'),
                 (int) $request->input('max_pages', 120),
+                $request->boolean('include_item_thumbnails', true),
+                $user ? $this->service->cachedSellerForUser($user) : null,
             );
 
             if ($user && is_array($payload['seller'] ?? null)) {

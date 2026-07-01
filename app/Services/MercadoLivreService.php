@@ -177,8 +177,12 @@ final class MercadoLivreService
         bool $includePaymentsDetails,
         bool $includeShipmentsDetails,
         int $maxPages,
+        bool $includeItemThumbs = true,
+        ?array $knownSeller = null,
     ): array {
-        $seller = $this->request('/users/me', $accessToken);
+        $seller = is_array($knownSeller) && (int) ($knownSeller['id'] ?? 0) > 0
+            ? $knownSeller
+            : $this->request('/users/me', $accessToken);
         $sellerId = (int) ($seller['id'] ?? 0);
 
         if ($sellerId <= 0) {
@@ -213,17 +217,20 @@ final class MercadoLivreService
             $offset += $limit;
         }
 
-        $itemIds = [];
-        foreach ($allOrders as $order) {
-            foreach (($order['order_items'] ?? []) as $row) {
-                $itemId = trim((string) ($row['item']['id'] ?? ''));
-                if ($itemId !== '') {
-                    $itemIds[$itemId] = true;
+        $thumbs = [];
+        if ($includeItemThumbs) {
+            $itemIds = [];
+            foreach ($allOrders as $order) {
+                foreach (($order['order_items'] ?? []) as $row) {
+                    $itemId = trim((string) ($row['item']['id'] ?? ''));
+                    if ($itemId !== '') {
+                        $itemIds[$itemId] = true;
+                    }
                 }
             }
-        }
 
-        $thumbs = $this->fetchItemsThumbs(array_keys($itemIds), $accessToken);
+            $thumbs = $this->fetchItemsThumbs(array_keys($itemIds), $accessToken);
+        }
 
         $enrichedOrders = array_map(function (array $order) use ($thumbs) {
             foreach (($order['order_items'] ?? []) as $index => $row) {
@@ -292,6 +299,11 @@ final class MercadoLivreService
             'last_synced_at' => $account?->last_synced_at?->toIso8601String(),
             'has_refresh_token' => $account !== null && trim((string) $account->refresh_token) !== '',
         ];
+    }
+
+    public function cachedSellerForUser(User $user): ?array
+    {
+        return $this->sellerFromAccount($user->mercadoLivreAccount()->first());
     }
 
     public function disconnectAccountForUser(User $user): void
