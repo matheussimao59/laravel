@@ -19,6 +19,15 @@ use App\Http\Controllers\Api\ProductMatrixController;
 use App\Http\Controllers\Api\ShippingOrderController;
 use App\Http\Controllers\Api\ShopeeOrderController;
 use App\Http\Controllers\Api\FiscalProviderController;
+use App\Http\Controllers\Api\GpClientController;
+use App\Http\Controllers\Api\GpSupplierController;
+use App\Http\Controllers\Api\GpProductController;
+use App\Http\Controllers\Api\GpOrderController;
+use App\Http\Controllers\Api\GpQuoteController;
+use App\Http\Controllers\Api\GpProductionController;
+use App\Http\Controllers\Api\GpDeliveryController;
+use App\Http\Controllers\Api\GpFinancialController;
+use App\Http\Controllers\Api\GpProductTemplateController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
@@ -117,5 +126,58 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('integrations/fiscal')->group(function () {
         Route::post('/emit', [FiscalProviderController::class, 'emit']);
         Route::post('/status', [FiscalProviderController::class, 'status']);
+    });
+
+    // ─── Gráfica Plus ───
+    Route::prefix('grafica-plus')->group(function () {
+        Route::get('/clients', [GpClientController::class, 'index']);
+        Route::post('/clients', [GpClientController::class, 'store']);
+        Route::put('/clients/{client}', [GpClientController::class, 'update']);
+        Route::delete('/clients/{client}', [GpClientController::class, 'destroy']);
+
+        Route::get('/suppliers', [GpSupplierController::class, 'index']);
+        Route::post('/suppliers', [GpSupplierController::class, 'store']);
+        Route::put('/suppliers/{supplier}', [GpSupplierController::class, 'update']);
+        Route::delete('/suppliers/{supplier}', [GpSupplierController::class, 'destroy']);
+
+        Route::get('/products', [GpProductController::class, 'index']);
+        Route::post('/products', [GpProductController::class, 'store']);
+        Route::put('/products/{product}', [GpProductController::class, 'update']);
+        Route::delete('/products/{product}', [GpProductController::class, 'destroy']);
+
+        Route::get('/quotes', [GpQuoteController::class, 'index']);
+        Route::post('/quotes', [GpQuoteController::class, 'store']);
+        Route::put('/quotes/{quote}', [GpQuoteController::class, 'update']);
+        Route::delete('/quotes/{quote}', [GpQuoteController::class, 'destroy']);
+        Route::post('/quotes/{quote}/approve', [GpQuoteController::class, 'approve']);
+
+        Route::get('/orders', [GpOrderController::class, 'index']);
+        Route::post('/orders', [GpOrderController::class, 'store']);
+        Route::patch('/orders/{order}', [GpOrderController::class, 'update']);
+        Route::delete('/orders/{order}', [GpOrderController::class, 'destroy']);
+
+        Route::get('/production', [GpProductionController::class, 'index']);
+        Route::patch('/production/{productionOrder}', [GpProductionController::class, 'update']);
+
+        Route::get('/deliveries', [GpDeliveryController::class, 'index']);
+        Route::patch('/deliveries/{delivery}', [GpDeliveryController::class, 'update']);
+
+        Route::get('/cash-flow', [GpFinancialController::class, 'indexCashFlow']);
+        Route::post('/cash-flow', [GpFinancialController::class, 'storeCashFlow']);
+        Route::delete('/cash-flow/{entry}', [GpFinancialController::class, 'destroyCashFlow']);
+
+        Route::get('/bills', [GpFinancialController::class, 'indexBills']);
+        Route::post('/bills', [GpFinancialController::class, 'storeBill']);
+        Route::patch('/bills/{bill}', [GpFinancialController::class, 'updateBill']);
+        Route::delete('/bills/{bill}', [GpFinancialController::class, 'destroyBill']);
+
+        Route::get('/expenses', [GpFinancialController::class, 'indexExpenses']);
+        Route::post('/expenses', [GpFinancialController::class, 'storeExpense']);
+        Route::delete('/expenses/{expense}', [GpFinancialController::class, 'destroyExpense']);
+
+        Route::get('/product-templates', [GpProductTemplateController::class, 'index']);
+        Route::post('/product-templates', [GpProductTemplateController::class, 'store']);
+        Route::put('/product-templates/{template}', [GpProductTemplateController::class, 'update']);
+        Route::delete('/product-templates/{template}', [GpProductTemplateController::class, 'destroy']);
     });
 });
