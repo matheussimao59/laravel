@@ -83,8 +83,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('pricing/materials', PricingMaterialController::class)->parameter('materials', 'material');
     Route::apiResource('pricing/products', PricingProductController::class)->parameter('products', 'product');
     Route::apiResource('product-matrices', ProductMatrixController::class)->parameter('product-matrices', 'matrix');
-    Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order');
-    Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy']);
+    Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order')->names('calendar.orders');
+    Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy'])->names('impressao.orders');
     Route::get('/print/jobs', [LocalPrintJobController::class, 'index']);
     Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
     Route::post('/print/jobs/clear-history', [LocalPrintJobController::class, 'clearCompleted']);
