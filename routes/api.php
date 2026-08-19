@@ -41,6 +41,47 @@ Route::get('/test/categories', function () {
     }
 });
 
+Route::get('/test/categories/{id}', function ($id) {
+    try {
+        $cat = \App\Models\GpCategory::findOrFail($id);
+        return response()->json(['data' => $cat]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 404);
+    }
+});
+
+Route::post('/test/categories', function (\Illuminate\Http\Request $request) {
+    try {
+        $cat = \App\Models\GpCategory::create([
+            'name' => $request->input('name'),
+            'description' => $request->input('description'),
+            'user_id' => 1,
+        ]);
+        return response()->json(['data' => $cat], 201);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+
+Route::put('/test/categories/{id}', function ($id, \Illuminate\Http\Request $request) {
+    try {
+        $cat = \App\Models\GpCategory::findOrFail($id);
+        $cat->update($request->only(['name', 'description']));
+        return response()->json(['data' => $cat]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+
+Route::delete('/test/categories/{id}', function ($id) {
+    try {
+        \App\Models\GpCategory::findOrFail($id)->delete();
+        return response()->json(['message' => 'Removido']);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+});
+
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
