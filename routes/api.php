@@ -34,6 +34,9 @@ Route::get('/health', HealthController::class);
 
 Route::get('/test/categories', function () {
     try {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('gp_categories')) {
+            return response()->json(['data' => [], 'error' => 'Tabela gp_categories nao existe. Rode: php artisan migrate']);
+        }
         $categories = \App\Models\GpCategory::all();
         return response()->json(['data' => $categories]);
     } catch (\Throwable $e) {
@@ -52,10 +55,13 @@ Route::get('/test/categories/{id}', function ($id) {
 
 Route::post('/test/categories', function (\Illuminate\Http\Request $request) {
     try {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('gp_categories')) {
+            return response()->json(['error' => 'Tabela gp_categories nao existe. Rode: php artisan migrate'], 500);
+        }
         $cat = \App\Models\GpCategory::create([
             'name' => $request->input('name'),
             'description' => $request->input('description'),
-            'user_id' => 1,
+            'user_id' => \App\Models\User::first()?->id ?? 1,
         ]);
         return response()->json(['data' => $cat], 201);
     } catch (\Throwable $e) {
