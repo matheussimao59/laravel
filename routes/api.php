@@ -28,6 +28,8 @@ use App\Http\Controllers\Api\GpProductionController;
 use App\Http\Controllers\Api\GpDeliveryController;
 use App\Http\Controllers\Api\GpFinancialController;
 use App\Http\Controllers\Api\GpProductTemplateController;
+use App\Http\Controllers\Api\GpCategoryController;
+use App\Http\Controllers\Api\GpAiController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
@@ -195,6 +197,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/suppliers', [GpSupplierController::class, 'store']);
         Route::put('/suppliers/{supplier}', [GpSupplierController::class, 'update']);
         Route::delete('/suppliers/{supplier}', [GpSupplierController::class, 'destroy']);
+
+        Route::get('/categories', [GpCategoryController::class, 'index']);
+        Route::post('/categories', [GpCategoryController::class, 'store']);
+        Route::put('/categories/{category}', [GpCategoryController::class, 'update']);
+        Route::delete('/categories/{category}', [GpCategoryController::class, 'destroy']);
+
+        Route::post('/ai/generate-product', [GpAiController::class, 'generateProduct']);
 
         Route::get('/products', [GpProductController::class, 'index']);
         Route::post('/products', [GpProductController::class, 'store']);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\GpProduct;
+use App\Models\GpCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -33,8 +34,10 @@ class GpProductController
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:255'],
+            'category_id' => ['nullable', 'integer', 'exists:gp_categories,id'],
             'description' => ['nullable', 'string'],
             'sell_price' => ['required', 'numeric', 'min:0'],
+            'pricing_type' => ['nullable', 'string', 'in:fixed,per_sheet'],
             'stock_qty' => ['nullable', 'integer', 'min:0'],
             'cost_materials' => ['nullable', 'numeric', 'min:0'],
             'cost_labor' => ['nullable', 'numeric', 'min:0'],
@@ -52,8 +55,10 @@ class GpProductController
             'user_id' => $user->id,
             'name' => trim($request->input('name')),
             'category' => $request->input('category'),
+            'category_id' => $request->input('category_id'),
             'description' => $request->input('description'),
             'sell_price' => $request->input('sell_price'),
+            'pricing_type' => $request->input('pricing_type', 'fixed'),
             'stock_qty' => $request->input('stock_qty', 0),
             'cost_materials' => $request->input('cost_materials', 0),
             'cost_labor' => $request->input('cost_labor', 0),
@@ -81,8 +86,10 @@ class GpProductController
         $validator = Validator::make($request->all(), [
             'name' => ['sometimes', 'string', 'max:255'],
             'category' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'category_id' => ['sometimes', 'nullable', 'integer', 'exists:gp_categories,id'],
             'description' => ['sometimes', 'nullable', 'string'],
             'sell_price' => ['sometimes', 'numeric', 'min:0'],
+            'pricing_type' => ['sometimes', 'nullable', 'string', 'in:fixed,per_sheet'],
             'stock_qty' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'cost_materials' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'cost_labor' => ['sometimes', 'nullable', 'numeric', 'min:0'],
@@ -97,7 +104,7 @@ class GpProductController
         }
 
         $product->update($request->only([
-            'name', 'category', 'description', 'sell_price', 'stock_qty',
+            'name', 'category', 'category_id', 'description', 'sell_price', 'pricing_type', 'stock_qty',
             'cost_materials', 'cost_labor', 'cost_fixed', 'cost_other',
             'active', 'image_url',
         ]));

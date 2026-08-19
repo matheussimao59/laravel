@@ -15,8 +15,10 @@ class GpProduct extends Model
         'user_id',
         'name',
         'category',
+        'category_id',
         'description',
         'sell_price',
+        'pricing_type',
         'stock_qty',
         'cost_materials',
         'cost_labor',
@@ -41,6 +43,11 @@ class GpProduct extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function gpCategory()
+    {
+        return $this->belongsTo(GpCategory::class, 'category_id');
     }
 
     public function quoteItems()

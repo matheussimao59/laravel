@@ -21,4 +21,9 @@ class GpCategory extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function products()
+    {
+        return $this->hasMany(GpProduct::class, 'category_id');
+    }
 }
