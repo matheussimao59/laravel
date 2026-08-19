@@ -14,12 +14,14 @@ class GpProduct extends Model
     protected $fillable = [
         'user_id',
         'name',
+        'sku',
         'category',
         'category_id',
         'description',
         'sell_price',
         'pricing_type',
         'stock_qty',
+        'unit',
         'cost_materials',
         'cost_labor',
         'cost_fixed',
@@ -50,8 +52,25 @@ class GpProduct extends Model
         return $this->belongsTo(GpCategory::class, 'category_id');
     }
 
+    public function materials()
+    {
+        return $this->belongsToMany(GpMaterial::class, 'gp_product_materials', 'product_id', 'material_id')
+            ->withPivot('qty_needed', 'cost_override')
+            ->withTimestamps();
+    }
+
     public function quoteItems()
     {
         return $this->hasMany(GpQuoteItem::class, 'product_id');
+    }
+
+    public function getCalculatedCostMaterialsAttribute(): float
+    {
+        $total = 0.0;
+        foreach ($this->materials as $material) {
+            $unitCost = $material->pivot->cost_override ?? $material->unit_cost;
+            $total += $unitCost * $material->pivot->qty_needed;
+        }
+        return round($total, 2);
     }
 }

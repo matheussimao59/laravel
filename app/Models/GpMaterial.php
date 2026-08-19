@@ -39,4 +39,11 @@ class GpMaterial extends Model
     {
         return $this->belongsTo(GpSupplier::class, 'supplier_id');
     }
+
+    public function products()
+    {
+        return $this->belongsToMany(GpProduct::class, 'gp_product_materials', 'material_id', 'product_id')
+            ->withPivot('qty_needed', 'cost_override')
+            ->withTimestamps();
+    }
 }
