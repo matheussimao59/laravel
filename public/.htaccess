@@ -23,3 +23,14 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+<IfModule mod_headers.c>
+    SetEnvIf Origin "^https?://(www\.)?unicaprint\.com\.br$" AccessControlAllowOrigin=$0
+    Header set Access-Control-Allow-Origin "%{AccessControlAllowOrigin}e" env=AccessControlAllowOrigin
+    Header merge Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    Header merge Access-Control-Allow-Headers "Authorization, Content-Type, Accept, X-Requested-With"
+    Header merge Access-Control-Allow-Credentials "true"
+
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^(.*)$ $1 [R=204,L]
+</IfModule>
