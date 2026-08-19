@@ -32,6 +32,15 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
 
+Route::get('/test/categories', function () {
+    try {
+        $categories = \App\Models\GpCategory::all();
+        return response()->json(['data' => $categories]);
+    } catch (\Throwable $e) {
+        return response()->json(['data' => [], 'error' => $e->getMessage()]);
+    }
+});
+
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
