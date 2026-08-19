@@ -11,6 +11,10 @@ class GpAiController
 {
     public function generateProduct(Request $request): JsonResponse
     {
+        if ($request->isMethod('get')) {
+            return response()->json(['message' => 'Use POST para gerar produto com IA.'], 200);
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255'],
         ]);

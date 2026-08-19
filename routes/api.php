@@ -203,7 +203,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/categories/{category}', [GpCategoryController::class, 'update']);
         Route::delete('/categories/{category}', [GpCategoryController::class, 'destroy']);
 
-        Route::post('/ai/generate-product', [GpAiController::class, 'generateProduct']);
+        Route::match(['get', 'post'], '/ai/generate-product', [GpAiController::class, 'generateProduct']);
 
         Route::get('/products', [GpProductController::class, 'index']);
         Route::post('/products', [GpProductController::class, 'store']);
