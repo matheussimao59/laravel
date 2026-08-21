@@ -66,12 +66,29 @@ final class ModeloController
 
         if ($request->hasFile('pdf_base')) {
             $pdfFile = $request->file('pdf_base');
+            if ($pdfFile->getError() !== UPLOAD_ERR_OK) {
+                return response()->json([
+                    'message' => 'Falha no upload do arquivo PDF. Verifique o tamanho do arquivo.',
+                    'errors' => ['pdf_base' => 'Upload falhou com erro: ' . $pdfFile->getError()],
+                ], 422);
+            }
             $pdfName = $pdfFile->getClientOriginalName();
             $pdfPath = $pdfFile->store('modelos', 'public');
+            if (!$pdfPath) {
+                return response()->json([
+                    'message' => 'Falha ao salvar o arquivo PDF no servidor. Verifique as permissoes da pasta storage.',
+                ], 500);
+            }
         }
 
         if ($request->hasFile('verso_base')) {
             $versoFile = $request->file('verso_base');
+            if ($versoFile->getError() !== UPLOAD_ERR_OK) {
+                return response()->json([
+                    'message' => 'Falha no upload do verso. Verifique o tamanho do arquivo.',
+                    'errors' => ['verso_base' => 'Upload falhou com erro: ' . $versoFile->getError()],
+                ], 422);
+            }
             $versoName = $versoFile->getClientOriginalName();
             $versoPath = $versoFile->store('modelos', 'public');
         }
@@ -174,6 +191,12 @@ final class ModeloController
                 Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->pdf_path));
             }
             $pdfFile = $request->file('pdf_base');
+            if ($pdfFile->getError() !== UPLOAD_ERR_OK) {
+                return response()->json([
+                    'message' => 'Falha no upload do arquivo PDF. Verifique o tamanho do arquivo.',
+                    'errors' => ['pdf_base' => 'Upload falhou com erro: ' . $pdfFile->getError()],
+                ], 422);
+            }
             $updates['pdf_name'] = $pdfFile->getClientOriginalName();
             $updates['pdf_path'] = $pdfFile->store('modelos', 'public');
         }
@@ -191,6 +214,12 @@ final class ModeloController
                 Storage::disk('public')->delete(preg_replace('#^public/#', '', $row->verso_path));
             }
             $versoFile = $request->file('verso_base');
+            if ($versoFile->getError() !== UPLOAD_ERR_OK) {
+                return response()->json([
+                    'message' => 'Falha no upload do verso. Verifique o tamanho do arquivo.',
+                    'errors' => ['verso_base' => 'Upload falhou com erro: ' . $versoFile->getError()],
+                ], 422);
+            }
             $updates['verso_name'] = $versoFile->getClientOriginalName();
             $updates['verso_path'] = $versoFile->store('modelos', 'public');
         }

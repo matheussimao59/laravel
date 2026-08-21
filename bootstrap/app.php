@@ -18,10 +18,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
-
-        $middleware->api(prepend: [
-            \App\Http\Middleware\ForceCors::class,
-        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
