@@ -16,6 +16,8 @@ class GpMaterial extends Model
         'name',
         'unit',
         'unit_cost',
+        'total_paid',
+        'quantity_purchased',
         'stock_qty',
         'min_stock',
         'supplier_id',
@@ -27,6 +29,8 @@ class GpMaterial extends Model
     {
         return [
             'unit_cost' => 'decimal:2',
+            'total_paid' => 'decimal:2',
+            'quantity_purchased' => 'decimal:3',
         ];
     }
 

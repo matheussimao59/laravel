@@ -42,7 +42,9 @@ class GpMaterialController
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255'],
             'unit' => ['nullable', 'string', 'max:20'],
-            'unit_cost' => ['required', 'numeric', 'min:0'],
+            'unit_cost' => ['nullable', 'numeric', 'min:0'],
+            'total_paid' => ['nullable', 'numeric', 'min:0'],
+            'quantity_purchased' => ['nullable', 'numeric', 'min:0'],
             'stock_qty' => ['nullable', 'numeric', 'min:0'],
             'min_stock' => ['nullable', 'numeric', 'min:0'],
             'supplier_id' => ['nullable', 'integer', 'exists:gp_suppliers,id'],
@@ -54,11 +56,17 @@ class GpMaterialController
             return response()->json(['message' => 'Dados invalidos.', 'errors' => $validator->errors()], 422);
         }
 
+        $totalPaid = floatval($request->input('total_paid', 0));
+        $qtyPurchased = floatval($request->input('quantity_purchased', 0));
+        $unitCost = $qtyPurchased > 0 ? round($totalPaid / $qtyPurchased, 2) : floatval($request->input('unit_cost', 0));
+
         $material = GpMaterial::create([
             'user_id' => $user->id,
             'name' => trim($request->input('name')),
             'unit' => $request->input('unit', 'un'),
-            'unit_cost' => $request->input('unit_cost'),
+            'unit_cost' => $unitCost,
+            'total_paid' => $totalPaid,
+            'quantity_purchased' => $qtyPurchased,
             'stock_qty' => $request->input('stock_qty', 0),
             'min_stock' => $request->input('min_stock', 0),
             'supplier_id' => $request->input('supplier_id'),
@@ -84,7 +92,9 @@ class GpMaterialController
         $validator = Validator::make($request->all(), [
             'name' => ['sometimes', 'string', 'max:255'],
             'unit' => ['sometimes', 'nullable', 'string', 'max:20'],
-            'unit_cost' => ['sometimes', 'numeric', 'min:0'],
+            'unit_cost' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'total_paid' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'quantity_purchased' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'stock_qty' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'min_stock' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'supplier_id' => ['sometimes', 'nullable', 'integer', 'exists:gp_suppliers,id'],
@@ -96,10 +106,18 @@ class GpMaterialController
             return response()->json(['message' => 'Dados invalidos.', 'errors' => $validator->errors()], 422);
         }
 
-        $material->update($request->only([
-            'name', 'unit', 'unit_cost', 'stock_qty', 'min_stock',
+        $data = $request->only([
+            'name', 'unit', 'unit_cost', 'total_paid', 'quantity_purchased', 'stock_qty', 'min_stock',
             'supplier_id', 'image_url', 'notes',
-        ]));
+        ]);
+
+        if (isset($data['total_paid']) || isset($data['quantity_purchased'])) {
+            $totalPaid = floatval($data['total_paid'] ?? $material->total_paid);
+            $qtyPurchased = floatval($data['quantity_purchased'] ?? $material->quantity_purchased);
+            $data['unit_cost'] = $qtyPurchased > 0 ? round($totalPaid / $qtyPurchased, 2) : ($data['unit_cost'] ?? $material->unit_cost);
+        }
+
+        $material->update($data);
 
         return response()->json(['message' => 'Material atualizado com sucesso.', 'material' => $material]);
     }
