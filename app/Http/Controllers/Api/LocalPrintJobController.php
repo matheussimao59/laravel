@@ -115,6 +115,8 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
+        $this->touchAgentHeartbeat($userId);
+
         $limit = max(1, min(10, (int) $request->input('limit', 1)));
         $jobs = DB::transaction(function () use ($userId, $limit) {
             $staleBefore = now()->subMinutes(3)->toDateTimeString();
@@ -370,6 +372,8 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
+        $this->touchAgentHeartbeat($userId);
+
         $config = $this->agentConfigForUser($userId);
         $commands = is_array($config['pendingCommands'] ?? null) ? $config['pendingCommands'] : [];
         $selected = null;
@@ -529,6 +533,26 @@ final class LocalPrintJobController
             ->where('user_id', $userId)
             ->whereIn('status', ['pending', 'processing', 'failed'])
             ->exists();
+    }
+
+    private function touchAgentHeartbeat(int $userId): void
+    {
+        $config = $this->agentConfigForUser($userId);
+        $lastSeenAt = (string) ($config['lastSeenAt'] ?? '');
+
+        if ($lastSeenAt !== '') {
+            try {
+                $lastSeen = new \DateTimeImmutable($lastSeenAt);
+                if (now()->getTimestamp() - $lastSeen->getTimestamp() < 60) {
+                    return;
+                }
+            } catch (\Exception $e) {
+                // timestamp invalido: grava novamente abaixo
+            }
+        }
+
+        $config['lastSeenAt'] = now()->toIso8601String();
+        $this->saveAgentConfigForUser($userId, $config);
     }
 
     private function userIdFromAgentToken(string $token): ?int
