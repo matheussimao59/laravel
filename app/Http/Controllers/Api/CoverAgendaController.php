@@ -79,8 +79,8 @@ final class CoverAgendaController
 
         $validator = Validator::make($request->all(), [
             'order_id' => ['required', 'string', 'max:120'],
-            'front_image' => ['required', 'string'],
-            'back_image' => ['required', 'string'],
+            'front_image' => ['nullable', 'string', 'required_without:back_image'],
+            'back_image' => ['nullable', 'string', 'required_without:front_image'],
             'printed' => ['nullable', 'boolean'],
             'printed_at' => ['nullable', 'date'],
         ]);
