@@ -149,13 +149,40 @@ final class AppSettingController
 
     private function mapRow(object $row): array
     {
+        $config = $this->decodeJson($row->config_data);
+        if (is_array($config)) {
+            $config = $this->decorateConfig((string) $row->id, $config);
+        }
+
         return [
             'id' => (string) $row->id,
             'user_id' => $row->user_id ? (string) $row->user_id : null,
-            'config_data' => $this->decodeJson($row->config_data),
+            'config_data' => $config,
             'created_at' => $row->created_at,
             'updated_at' => $row->updated_at,
         ];
+    }
+
+    private function decorateConfig(string $settingId, array $config): array
+    {
+        if ($settingId !== 'local_print_agent_config') {
+            return $config;
+        }
+
+        $config['online'] = false;
+        $lastSeenAt = (string) ($config['lastSeenAt'] ?? '');
+
+        if ($lastSeenAt !== '') {
+            try {
+                $lastSeen = new \DateTimeImmutable($lastSeenAt);
+                $config['online'] = (now()->getTimestamp() - $lastSeen->getTimestamp()) < 300;
+                $config['lastSeenSecondsAgo'] = max(0, now()->getTimestamp() - $lastSeen->getTimestamp());
+            } catch (\Exception $e) {
+                $config['online'] = false;
+            }
+        }
+
+        return $config;
     }
 
     private function decodeJson(mixed $value): mixed
