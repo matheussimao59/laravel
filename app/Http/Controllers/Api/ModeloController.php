@@ -18,11 +18,12 @@ final class ModeloController
         }
 
         $modelsQuery = DB::table('modelos')
+            ->select('modelos.id', 'modelos.user_id', 'modelos.name', 'modelos.sheet_size', 'modelos.orientation', 'modelos.pdf_name', 'modelos.pdf_path', 'modelos.verso_name', 'modelos.verso_path', 'modelos.is_shared', 'modelos.shared_at', 'modelos.created_at')
             ->where(function ($query) use ($user) {
-                $query->where('user_id', $user->id);
+                $query->where('modelos.user_id', $user->id);
 
                 if ($this->hasSharedColumns()) {
-                    $query->orWhere('is_shared', true);
+                    $query->orWhere('modelos.is_shared', true);
                 }
 
                 if ($this->hasAccessTable()) {
