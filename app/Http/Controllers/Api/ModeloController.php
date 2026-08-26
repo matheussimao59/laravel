@@ -38,7 +38,7 @@ final class ModeloController
         $models = $modelsQuery
             ->orderByDesc('created_at')
             ->get()
-            ->map(fn ($row) => $this->mapRow($row, $user))
+            ->map(fn ($row) => $this->mapRow($row, $user, includeEditorState: false))
             ->values();
 
         return response()->json(['models' => $models]);
@@ -489,7 +489,7 @@ final class ModeloController
             ->first();
     }
 
-    private function mapRow(object $row, ?object $user = null): array
+    private function mapRow(object $row, ?object $user = null, bool $includeEditorState = true): array
     {
         $isOwner = $user ? ((int) $row->user_id === (int) $user->id) : false;
         $isShared = property_exists($row, 'is_shared') ? (bool) $row->is_shared : false;
@@ -515,7 +515,7 @@ final class ModeloController
             'pdf_url' => $row->pdf_path ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->pdf_path)) : null,
             'verso_name' => ($row->verso_name ?? null) ? (string) $row->verso_name : null,
             'verso_url' => ($row->verso_path ?? null) ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->verso_path)) : null,
-            'editor_state' => $row->editor_state ? json_decode($row->editor_state, true) : null,
+            'editor_state' => ($includeEditorState && $row->editor_state) ? json_decode($row->editor_state, true) : null,
             'is_shared' => $isShared,
             'shared_at' => property_exists($row, 'shared_at') ? $row->shared_at : null,
             'is_owner' => $isOwner,
