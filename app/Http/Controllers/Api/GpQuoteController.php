@@ -44,6 +44,7 @@ class GpQuoteController
             'status' => ['nullable', 'string'],
             'notes' => ['nullable', 'string'],
             'valid_until' => ['nullable', 'date'],
+            'delivery_date' => ['nullable', 'date'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['nullable', 'integer'],
             'items.*.product_name' => ['required', 'string', 'max:255'],
@@ -66,6 +67,7 @@ class GpQuoteController
                 'status' => $request->input('status', 'rascunho'),
                 'notes' => $request->input('notes'),
                 'valid_until' => $request->input('valid_until'),
+                'delivery_date' => $request->input('delivery_date'),
             ]);
 
             foreach ($request->input('items') as $item) {
@@ -107,6 +109,7 @@ class GpQuoteController
             'status' => ['sometimes', 'string'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'valid_until' => ['sometimes', 'nullable', 'date'],
+            'delivery_date' => ['sometimes', 'nullable', 'date'],
             'items' => ['sometimes', 'array'],
             'items.*.product_id' => ['nullable', 'integer'],
             'items.*.product_name' => ['required_with:items', 'string', 'max:255'],
@@ -122,7 +125,7 @@ class GpQuoteController
         DB::transaction(function () use ($quote, $request) {
             $quote->update($request->only([
                 'client_id', 'client_name', 'discount', 'total',
-                'status', 'notes', 'valid_until',
+                'status', 'notes', 'valid_until', 'delivery_date',
             ]));
 
             if ($request->has('items')) {

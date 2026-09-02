@@ -20,6 +20,7 @@ class GpQuote extends Model
         'status',
         'notes',
         'valid_until',
+        'delivery_date',
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class GpQuote extends Model
             'discount' => 'decimal:2',
             'total' => 'decimal:2',
             'valid_until' => 'date',
+            'delivery_date' => 'date',
         ];
     }
 
