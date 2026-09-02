@@ -28,6 +28,11 @@ class GpProduct extends Model
         'cost_other',
         'active',
         'image_url',
+        'cut_shape',
+        'cut_width',
+        'cut_height',
+        'cutting_machine_id',
+        'art_image_url',
     ];
 
     protected function casts(): array
@@ -50,6 +55,11 @@ class GpProduct extends Model
     public function gpCategory()
     {
         return $this->belongsTo(GpCategory::class, 'category_id');
+    }
+
+    public function cuttingMachine()
+    {
+        return $this->belongsTo(GpCuttingMachine::class, 'cutting_machine_id');
     }
 
     public function materials()

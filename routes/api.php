@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\GpProductTemplateController;
 use App\Http\Controllers\Api\GpCategoryController;
 use App\Http\Controllers\Api\GpAiController;
 use App\Http\Controllers\Api\GpMaterialController;
+use App\Http\Controllers\Api\GpCuttingMachineController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
@@ -251,5 +252,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/product-templates', [GpProductTemplateController::class, 'store']);
         Route::put('/product-templates/{template}', [GpProductTemplateController::class, 'update']);
         Route::delete('/product-templates/{template}', [GpProductTemplateController::class, 'destroy']);
+
+        // Maquinas de corte (cadastro usado para calculo de aproveitamento de folha)
+        Route::get('/cutting-machines', [GpCuttingMachineController::class, 'index']);
+        Route::post('/cutting-machines', [GpCuttingMachineController::class, 'store']);
+        Route::put('/cutting-machines/{machine}', [GpCuttingMachineController::class, 'update']);
+        Route::delete('/cutting-machines/{machine}', [GpCuttingMachineController::class, 'destroy']);
     });
 });

@@ -34,7 +34,7 @@ class GpProductController
 
         $products = $query->with(['materials' => function ($q) {
             $q->withPivot('qty_needed', 'cost_override');
-        }])->get();
+        }, 'cuttingMachine'])->get();
 
         return response()->json(['products' => $products]);
     }
@@ -62,6 +62,11 @@ class GpProductController
             'cost_other' => ['nullable', 'numeric', 'min:0'],
             'active' => ['nullable', 'boolean'],
             'image_url' => ['nullable', 'string'],
+            'cut_shape' => ['nullable', 'string', 'in:round,square,rectangle'],
+            'cut_width' => ['nullable', 'numeric', 'min:0'],
+            'cut_height' => ['nullable', 'numeric', 'min:0'],
+            'cutting_machine_id' => ['nullable', 'integer', 'exists:gp_cutting_machines,id'],
+            'art_image_url' => ['nullable', 'string'],
             'materials' => ['nullable', 'array'],
             'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
@@ -92,6 +97,11 @@ class GpProductController
                 'cost_other' => $request->input('cost_other', 0),
                 'active' => $request->boolean('active', true),
                 'image_url' => $request->input('image_url'),
+                'cut_shape' => $request->input('cut_shape'),
+                'cut_width' => $request->input('cut_width'),
+                'cut_height' => $request->input('cut_height'),
+                'cutting_machine_id' => $request->input('cutting_machine_id'),
+                'art_image_url' => $request->input('art_image_url'),
             ]);
 
             if ($request->has('materials')) {
@@ -144,6 +154,11 @@ class GpProductController
             'cost_other' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'active' => ['sometimes', 'boolean'],
             'image_url' => ['sometimes', 'nullable', 'string'],
+            'cut_shape' => ['sometimes', 'nullable', 'string', 'in:round,square,rectangle'],
+            'cut_width' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'cut_height' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'cutting_machine_id' => ['sometimes', 'nullable', 'integer', 'exists:gp_cutting_machines,id'],
+            'art_image_url' => ['sometimes', 'nullable', 'string'],
             'materials' => ['nullable', 'array'],
             'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
@@ -161,6 +176,7 @@ class GpProductController
                 'name', 'sku', 'category', 'category_id', 'description', 'sell_price', 'pricing_type', 'stock_qty',
                 'unit', 'cost_materials', 'cost_labor', 'cost_fixed', 'cost_other',
                 'active', 'image_url',
+                'cut_shape', 'cut_width', 'cut_height', 'cutting_machine_id', 'art_image_url',
             ]));
 
             if ($request->has('materials')) {
