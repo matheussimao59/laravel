@@ -18,8 +18,10 @@ class GpOrder extends Model
         'client_name',
         'client_phone',
         'product_name',
+        'product_size',
         'description',
         'qty',
+        'sticker_qty',
         'unit_price',
         'total',
         'status',
@@ -38,6 +40,8 @@ class GpOrder extends Model
         return [
             'unit_price' => 'decimal:2',
             'total' => 'decimal:2',
+            'qty' => 'integer',
+            'sticker_qty' => 'integer',
             'delivery_date' => 'date',
             'deadline' => 'date',
         ];

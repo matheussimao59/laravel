@@ -40,8 +40,10 @@ class GpOrderController
             'client_name' => ['required', 'string', 'max:255'],
             'client_phone' => ['nullable', 'string', 'max:50'],
             'product_name' => ['required', 'string', 'max:255'],
+            'product_size' => ['nullable', 'string', 'max:120'],
             'description' => ['nullable', 'string'],
             'qty' => ['required', 'integer', 'min:1'],
+            'sticker_qty' => ['nullable', 'integer', 'min:0'],
             'unit_price' => ['required', 'numeric', 'min:0'],
             'total' => ['required', 'numeric', 'min:0'],
             'status' => ['nullable', 'string'],
@@ -67,8 +69,10 @@ class GpOrderController
                 'client_name' => trim($request->input('client_name')),
                 'client_phone' => $request->input('client_phone'),
                 'product_name' => trim($request->input('product_name')),
+                'product_size' => $request->input('product_size'),
                 'description' => $request->input('description'),
                 'qty' => $request->input('qty'),
+                'sticker_qty' => $request->input('sticker_qty'),
                 'unit_price' => $request->input('unit_price'),
                 'total' => $request->input('total'),
                 'status' => $request->input('status', 'recebido'),
@@ -137,8 +141,10 @@ class GpOrderController
             'client_name' => ['sometimes', 'string', 'max:255'],
             'client_phone' => ['sometimes', 'nullable', 'string', 'max:50'],
             'product_name' => ['sometimes', 'string', 'max:255'],
+            'product_size' => ['sometimes', 'nullable', 'string', 'max:120'],
             'description' => ['sometimes', 'nullable', 'string'],
             'qty' => ['sometimes', 'integer', 'min:1'],
+            'sticker_qty' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
             'total' => ['sometimes', 'numeric', 'min:0'],
             'status' => ['sometimes', 'string'],
@@ -158,8 +164,8 @@ class GpOrderController
 
         $oldStatus = $order->status;
         $data = $request->only([
-            'client_name', 'client_phone', 'product_name', 'description',
-            'qty', 'unit_price', 'total', 'status', 'payment_status',
+            'client_name', 'client_phone', 'product_name', 'product_size', 'description',
+            'qty', 'sticker_qty', 'unit_price', 'total', 'status', 'payment_status',
             'payment_method', 'payment_note', 'delivery_method', 'delivery_date',
             'deadline', 'responsible', 'notes',
         ]);
