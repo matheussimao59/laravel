@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\GpCategoryController;
 use App\Http\Controllers\Api\GpAiController;
 use App\Http\Controllers\Api\GpMaterialController;
 use App\Http\Controllers\Api\GpCuttingMachineController;
+use App\Http\Controllers\Api\GpSaleController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
@@ -211,6 +212,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/products', [GpProductController::class, 'store']);
         Route::put('/products/{product}', [GpProductController::class, 'update']);
         Route::delete('/products/{product}', [GpProductController::class, 'destroy']);
+
+        Route::get('/sales', [GpSaleController::class, 'index']);
+        Route::post('/sales', [GpSaleController::class, 'store']);
 
         // MATERIALS
         Route::get('/materials', [GpMaterialController::class, 'index']);
