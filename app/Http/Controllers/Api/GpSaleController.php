@@ -39,6 +39,7 @@ class GpSaleController
             'client_phone' => ['nullable', 'string', 'max:50'],
             'delivery_date' => ['nullable', 'date'],
             'payment_method' => ['nullable', 'string'],
+            'payment_status' => ['nullable', 'string', 'in:pago,pendente'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'total' => ['required', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
@@ -58,6 +59,7 @@ class GpSaleController
                 'client_phone' => $request->input('client_phone'),
                 'delivery_date' => $request->input('delivery_date'),
                 'payment_method' => $request->input('payment_method'),
+                'payment_status' => $request->input('payment_status', 'pendente'),
                 'discount' => $request->input('discount', 0),
                 'total' => $request->input('total'),
             ]);

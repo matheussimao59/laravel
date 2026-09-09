@@ -16,6 +16,7 @@ class GpSale extends Model
         'client_name',
         'client_phone',
         'payment_method',
+        'payment_status',
         'delivery_date',
         'discount',
         'total',
