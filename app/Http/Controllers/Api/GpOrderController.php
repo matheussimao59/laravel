@@ -9,6 +9,7 @@ use App\Models\GpDelivery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class GpOrderController
@@ -81,28 +82,36 @@ class GpOrderController
                 'notes' => $request->input('notes'),
             ]);
 
-            GpProductionOrder::create([
-                'user_id' => $user->id,
-                'order_id' => $order->id,
-                'client_name' => $order->client_name,
-                'product_name' => $order->product_name,
-                'qty' => $order->qty,
-                'total' => $order->total,
-                'stage' => 'fila',
-                'priority' => 'normal',
-                'deadline' => $order->deadline,
-            ]);
+            try {
+                GpProductionOrder::create([
+                    'user_id' => $user->id,
+                    'order_id' => $order->id,
+                    'client_name' => $order->client_name,
+                    'product_name' => $order->product_name,
+                    'qty' => $order->qty,
+                    'total' => $order->total,
+                    'stage' => 'fila',
+                    'priority' => 'normal',
+                    'deadline' => $order->deadline,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Falha ao criar ordem de producao do pedido ' . $order->id . ': ' . $e->getMessage());
+            }
 
-            GpDelivery::create([
-                'user_id' => $user->id,
-                'order_id' => $order->id,
-                'client_name' => $order->client_name,
-                'product_name' => $order->product_name,
-                'method' => $order->delivery_method,
-                'status' => 'pendente',
-                'scheduled_date' => $order->delivery_date,
-                'address' => $request->input('delivery_address'),
-            ]);
+            try {
+                GpDelivery::create([
+                    'user_id' => $user->id,
+                    'order_id' => $order->id,
+                    'client_name' => $order->client_name,
+                    'product_name' => $order->product_name,
+                    'method' => $order->delivery_method,
+                    'status' => 'pendente',
+                    'scheduled_date' => $order->delivery_date,
+                    'address' => $request->input('delivery_address'),
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Falha ao criar entrega do pedido ' . $order->id . ': ' . $e->getMessage());
+            }
 
             return $order;
         });
