@@ -13,6 +13,7 @@ class GpSale extends Model
 
     protected $fillable = [
         'user_id',
+        'client_id',
         'client_name',
         'client_phone',
         'payment_method',
@@ -34,6 +35,11 @@ class GpSale extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function client()
+    {
+        return $this->belongsTo(GpClient::class, 'client_id');
     }
 
     public function items()

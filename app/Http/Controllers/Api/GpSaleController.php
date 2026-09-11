@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Models\GpClient;
 use App\Models\GpProduct;
 use App\Models\GpSale;
 use App\Models\GpSaleItem;
@@ -35,6 +36,7 @@ class GpSaleController
         }
 
         $validator = Validator::make($request->all(), [
+            'client_id' => ['nullable', 'integer'],
             'client_name' => ['required', 'string', 'max:255'],
             'client_phone' => ['nullable', 'string', 'max:50'],
             'delivery_date' => ['nullable', 'date'],
@@ -53,8 +55,17 @@ class GpSaleController
         }
 
         $sale = DB::transaction(function () use ($request, $user) {
+            $clientId = $request->input('client_id');
+            if (!$clientId) {
+                $client = GpClient::where('user_id', $user->id)
+                    ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower(trim($request->input('client_name')))])
+                    ->first();
+                $clientId = $client?->id;
+            }
+
             $sale = GpSale::create([
                 'user_id' => $user->id,
+                'client_id' => $clientId,
                 'client_name' => trim($request->input('client_name')),
                 'client_phone' => $request->input('client_phone'),
                 'delivery_date' => $request->input('delivery_date'),

@@ -34,4 +34,9 @@ class GpClient extends Model
     {
         return $this->hasMany(GpOrder::class, 'client_id');
     }
+
+    public function sales()
+    {
+        return $this->hasMany(GpSale::class, 'client_id');
+    }
 }

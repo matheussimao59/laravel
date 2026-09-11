@@ -195,6 +195,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/clients', [GpClientController::class, 'store']);
         Route::put('/clients/{client}', [GpClientController::class, 'update']);
         Route::delete('/clients/{client}', [GpClientController::class, 'destroy']);
+        Route::get('/clients/{client}/history', [GpClientController::class, 'history']);
 
         Route::get('/suppliers', [GpSupplierController::class, 'index']);
         Route::post('/suppliers', [GpSupplierController::class, 'store']);
