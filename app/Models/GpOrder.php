@@ -4,12 +4,22 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class GpOrder extends Model
 {
     use HasFactory;
 
     protected $table = 'gp_orders';
+
+    protected static function booted(): void
+    {
+        static::creating(function (GpOrder $order) {
+            if (empty($order->proof_token)) {
+                $order->proof_token = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'user_id',
@@ -22,6 +32,8 @@ class GpOrder extends Model
         'description',
         'qty',
         'sticker_qty',
+        'art_status',
+        'proof_token',
         'unit_price',
         'total',
         'status',

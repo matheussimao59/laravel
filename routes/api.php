@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\GpCategoryController;
 use App\Http\Controllers\Api\GpAiController;
 use App\Http\Controllers\Api\GpMaterialController;
 use App\Http\Controllers\Api\GpCuttingMachineController;
+use App\Http\Controllers\Api\GpProofController;
 use App\Http\Controllers\Api\GpSaleController;
 use Illuminate\Support\Facades\Route;
 
@@ -105,6 +106,10 @@ Route::post('/print-agent/printers', [LocalPrintJobController::class, 'syncPrint
 Route::get('/print-agent/commands/next', [LocalPrintJobController::class, 'nextCommand']);
 Route::post('/print-agent/commands/{command}/complete', [LocalPrintJobController::class, 'completeCommand']);
 
+// Prova digital (acesso publico para aprovacao do cliente)
+Route::get('/public/proof/{order}/{token}', [GpProofController::class, 'show']);
+Route::post('/public/proof/{order}/{token}/respond', [GpProofController::class, 'respond']);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -164,6 +169,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/modelos', [ModeloController::class, 'store']);
     Route::get('/modelos/access-users', [ModeloController::class, 'accessUsers']);
     Route::post('/modelos/access-users', [ModeloController::class, 'updateBulkAccessUsers']);
+    Route::post('/modelos/{modelo}/duplicate', [ModeloController::class, 'duplicate']);
     Route::get('/modelos/{modelo}', [ModeloController::class, 'show']);
     Route::post('/modelos/{modelo}/share', [ModeloController::class, 'share']);
     Route::post('/modelos/{modelo}/access-users', [ModeloController::class, 'updateAccessUsers']);

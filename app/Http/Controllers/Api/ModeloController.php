@@ -116,6 +116,76 @@ final class ModeloController
         ]);
     }
 
+    public function duplicate(Request $request, $modelo): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $row = $this->getVisibleModelForUser($request, $modelo);
+        if (!$row) {
+            return response()->json(['message' => 'Modelo nao encontrado.'], 404);
+        }
+
+        $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
+            'sheet_size' => ['nullable', 'string', 'max:50'],
+            'orientation' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        $newName = isset($validated['name']) && trim((string) $validated['name']) !== ''
+            ? trim((string) $validated['name'])
+            : trim((string) $row->name) . ' (Copia)';
+
+        $pdfPath = null;
+        $pdfName = null;
+        if ($row->pdf_path) {
+            $sourcePath = preg_replace('#^public/#', '', (string) $row->pdf_path);
+            if (trim($sourcePath) !== '' && Storage::disk('public')->exists($sourcePath)) {
+                $extension = pathinfo($sourcePath, PATHINFO_EXTENSION);
+                $newPath = 'modelos/' . uniqid('modelo-', true) . ($extension ? '.' . $extension : '');
+                Storage::disk('public')->copy($sourcePath, $newPath);
+                $pdfPath = $newPath;
+                $pdfName = $row->pdf_name ? (string) $row->pdf_name : null;
+            }
+        }
+
+        $versoPath = null;
+        $versoName = null;
+        if (($row->verso_path ?? null)) {
+            $sourcePath = preg_replace('#^public/#', '', (string) $row->verso_path);
+            if (trim($sourcePath) !== '' && Storage::disk('public')->exists($sourcePath)) {
+                $extension = pathinfo($sourcePath, PATHINFO_EXTENSION);
+                $newPath = 'modelos/' . uniqid('modelo-verso-', true) . ($extension ? '.' . $extension : '');
+                Storage::disk('public')->copy($sourcePath, $newPath);
+                $versoPath = $newPath;
+                $versoName = $row->verso_name ? (string) $row->verso_name : null;
+            }
+        }
+
+        $id = DB::table('modelos')->insertGetId([
+            'user_id' => (int) $user->id,
+            'name' => $newName,
+            'sheet_size' => trim($validated['sheet_size'] ?? $row->sheet_size),
+            'orientation' => trim($validated['orientation'] ?? $row->orientation),
+            'pdf_name' => $pdfName,
+            'pdf_path' => $pdfPath,
+            'verso_name' => $versoName,
+            'verso_path' => $versoPath,
+            'editor_state' => ($row->editor_state ?? null),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $newRow = DB::table('modelos')->where('id', $id)->first();
+
+        return response()->json([
+            'message' => 'Modelo duplicado com sucesso.',
+            'model' => $newRow ? $this->mapRow($newRow, $user) : null,
+        ]);
+    }
+
     public function show(Request $request, $modelo): JsonResponse
     {
         $user = $request->user();

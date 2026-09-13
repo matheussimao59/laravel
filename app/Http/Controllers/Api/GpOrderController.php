@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\GpOrder;
 use App\Models\GpOrderEvent;
+use App\Models\GpOrderFile;
 use App\Models\GpProductionOrder;
 use App\Models\GpDelivery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class GpOrderController
@@ -44,6 +46,7 @@ class GpOrderController
             'description' => ['nullable', 'string'],
             'qty' => ['required', 'integer', 'min:1'],
             'sticker_qty' => ['nullable', 'integer', 'min:0'],
+            'art_status' => ['nullable', 'string', 'max:30'],
             'unit_price' => ['required', 'numeric', 'min:0'],
             'total' => ['required', 'numeric', 'min:0'],
             'status' => ['nullable', 'string'],
@@ -73,6 +76,7 @@ class GpOrderController
                 'description' => $request->input('description'),
                 'qty' => $request->input('qty'),
                 'sticker_qty' => $request->input('sticker_qty'),
+                'art_status' => $request->input('art_status', 'pendente_arte'),
                 'unit_price' => $request->input('unit_price'),
                 'total' => $request->input('total'),
                 'status' => $request->input('status', 'recebido'),
@@ -117,6 +121,23 @@ class GpOrderController
                 Log::error('Falha ao criar entrega do pedido ' . $order->id . ': ' . $e->getMessage());
             }
 
+            if ($request->hasFile('files')) {
+                foreach ($request->file('files') as $file) {
+                    try {
+                        $path = $file->store('gp-orders/' . $order->id, 'public');
+                        GpOrderFile::create([
+                            'order_id' => $order->id,
+                            'filename' => $file->getClientOriginalName() ?: 'arquivo',
+                            'url' => Storage::url($path),
+                            'mime_type' => $file->getMimeType(),
+                            'size_bytes' => $file->getSize(),
+                        ]);
+                    } catch (\Throwable $e) {
+                        Log::error('Falha ao salvar arquivo do pedido ' . $order->id . ': ' . $e->getMessage());
+                    }
+                }
+            }
+
             return $order;
         });
 
@@ -145,6 +166,7 @@ class GpOrderController
             'description' => ['sometimes', 'nullable', 'string'],
             'qty' => ['sometimes', 'integer', 'min:1'],
             'sticker_qty' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'art_status' => ['sometimes', 'nullable', 'string', 'max:30'],
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
             'total' => ['sometimes', 'numeric', 'min:0'],
             'status' => ['sometimes', 'string'],
@@ -163,9 +185,10 @@ class GpOrderController
         }
 
         $oldStatus = $order->status;
+        $oldArtStatus = $order->art_status;
         $data = $request->only([
             'client_name', 'client_phone', 'product_name', 'product_size', 'description',
-            'qty', 'sticker_qty', 'unit_price', 'total', 'status', 'payment_status',
+            'qty', 'sticker_qty', 'art_status', 'unit_price', 'total', 'status', 'payment_status',
             'payment_method', 'payment_note', 'delivery_method', 'delivery_date',
             'deadline', 'responsible', 'notes',
         ]);
@@ -177,6 +200,15 @@ class GpOrderController
                 'order_id' => $order->id,
                 'status' => $data['status'],
                 'note' => "Status alterado de '$oldStatus' para '{$data['status']}'",
+                'created_by' => $user->name,
+            ]);
+        }
+
+        if (isset($data['art_status']) && $data['art_status'] !== $oldArtStatus && $oldArtStatus !== null) {
+            GpOrderEvent::create([
+                'order_id' => $order->id,
+                'status' => $order->status,
+                'note' => "Arte alterada de '$oldArtStatus' para '{$data['art_status']}'",
                 'created_by' => $user->name,
             ]);
         }
