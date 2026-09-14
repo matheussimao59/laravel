@@ -459,7 +459,7 @@ final class LocalPrintJobController
         }
 
         $validator = Validator::make($request->all(), [
-            'printers' => ['required', 'array'],
+            'printers' => ['present', 'array'],
             'printers.*.name' => ['required', 'string', 'max:180'],
             'printers.*.is_default' => ['nullable', 'boolean'],
         ]);
