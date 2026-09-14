@@ -67,6 +67,7 @@ class GpProductController
             'cut_height' => ['nullable', 'numeric', 'min:0'],
             'cutting_machine_id' => ['nullable', 'integer', 'exists:gp_cutting_machines,id'],
             'art_image_url' => ['nullable', 'string'],
+            'sale_channels_json' => ['nullable', 'array'],
             'materials' => ['nullable', 'array'],
             'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
@@ -102,6 +103,7 @@ class GpProductController
                 'cut_height' => $request->input('cut_height'),
                 'cutting_machine_id' => $request->input('cutting_machine_id'),
                 'art_image_url' => $request->input('art_image_url'),
+                'sale_channels_json' => $request->input('sale_channels_json'),
             ]);
 
             if ($request->has('materials')) {
@@ -159,6 +161,7 @@ class GpProductController
             'cut_height' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'cutting_machine_id' => ['sometimes', 'nullable', 'integer', 'exists:gp_cutting_machines,id'],
             'art_image_url' => ['sometimes', 'nullable', 'string'],
+            'sale_channels_json' => ['nullable', 'array'],
             'materials' => ['nullable', 'array'],
             'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
@@ -177,6 +180,7 @@ class GpProductController
                 'unit', 'cost_materials', 'cost_labor', 'cost_fixed', 'cost_other',
                 'active', 'image_url',
                 'cut_shape', 'cut_width', 'cut_height', 'cutting_machine_id', 'art_image_url',
+                'sale_channels_json',
             ]));
 
             if ($request->has('materials')) {

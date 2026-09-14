@@ -33,6 +33,7 @@ class GpProduct extends Model
         'cut_height',
         'cutting_machine_id',
         'art_image_url',
+        'sale_channels_json',
     ];
 
     protected function casts(): array
@@ -44,6 +45,7 @@ class GpProduct extends Model
             'cost_fixed' => 'decimal:2',
             'cost_other' => 'decimal:2',
             'active' => 'boolean',
+            'sale_channels_json' => 'json',
         ];
     }
 
