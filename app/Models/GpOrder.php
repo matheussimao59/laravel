@@ -93,4 +93,9 @@ class GpOrder extends Model
     {
         return $this->hasMany(GpDelivery::class, 'order_id');
     }
+
+    public function items()
+    {
+        return $this->hasMany(GpOrderItem::class, 'order_id')->orderBy('id');
+    }
 }

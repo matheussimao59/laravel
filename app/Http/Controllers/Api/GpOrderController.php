@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\GpOrder;
 use App\Models\GpOrderEvent;
 use App\Models\GpOrderFile;
+use App\Models\GpOrderItem;
 use App\Models\GpProductionOrder;
 use App\Models\GpDelivery;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +25,7 @@ class GpOrderController
         }
 
         $orders = GpOrder::where('user_id', $user->id)
-            ->with(['files', 'events'])
+            ->with(['files', 'events', 'items'])
             ->orderByDesc('created_at')
             ->get();
 
@@ -41,14 +42,14 @@ class GpOrderController
         $validator = Validator::make($request->all(), [
             'client_name' => ['required', 'string', 'max:255'],
             'client_phone' => ['nullable', 'string', 'max:50'],
-            'product_name' => ['required', 'string', 'max:255'],
+            'product_name' => ['required_without:items', 'string', 'max:255'],
             'product_size' => ['nullable', 'string', 'max:120'],
             'description' => ['nullable', 'string'],
-            'qty' => ['required', 'integer', 'min:1'],
+            'qty' => ['required_without:items', 'integer', 'min:1'],
             'sticker_qty' => ['nullable', 'integer', 'min:0'],
             'art_status' => ['nullable', 'string', 'max:30'],
-            'unit_price' => ['required', 'numeric', 'min:0'],
-            'total' => ['required', 'numeric', 'min:0'],
+            'unit_price' => ['required_without:items', 'numeric', 'min:0'],
+            'total' => ['required_without:items', 'numeric', 'min:0'],
             'status' => ['nullable', 'string'],
             'payment_status' => ['nullable', 'string'],
             'payment_method' => ['nullable', 'string'],
@@ -64,21 +65,30 @@ class GpOrderController
             return response()->json(['message' => 'Dados invalidos.', 'errors' => $validator->errors()], 422);
         }
 
-        $order = DB::transaction(function () use ($request, $user) {
+        $items = $this->parseItems($request->input('items'));
+        $itemErrors = $this->validateItems($items);
+        if (!empty($itemErrors)) {
+            return response()->json(['message' => 'Dados invalidos.', 'errors' => $itemErrors], 422);
+        }
+
+        $order = DB::transaction(function () use ($request, $user, $items) {
+            $isMulti = count($items) > 0;
+            $aggregate = $isMulti ? $this->aggregatesFromItems($items) : null;
+
             $order = GpOrder::create([
                 'user_id' => $user->id,
                 'quote_id' => $request->input('quote_id'),
                 'client_id' => $request->input('client_id'),
                 'client_name' => trim($request->input('client_name')),
                 'client_phone' => $request->input('client_phone'),
-                'product_name' => trim($request->input('product_name')),
-                'product_size' => $request->input('product_size'),
+                'product_name' => $aggregate ? $aggregate['product_name'] : trim($request->input('product_name')),
+                'product_size' => $aggregate ? $aggregate['product_size'] : $request->input('product_size'),
                 'description' => $request->input('description'),
-                'qty' => $request->input('qty'),
-                'sticker_qty' => $request->input('sticker_qty'),
+                'qty' => $aggregate ? $aggregate['qty'] : $request->input('qty'),
+                'sticker_qty' => $aggregate ? $aggregate['sticker_qty'] : $request->input('sticker_qty'),
                 'art_status' => $request->input('art_status', 'pendente_arte'),
-                'unit_price' => $request->input('unit_price'),
-                'total' => $request->input('total'),
+                'unit_price' => $aggregate ? $aggregate['unit_price'] : $request->input('unit_price'),
+                'total' => $aggregate ? $aggregate['total'] : $request->input('total'),
                 'status' => $request->input('status', 'recebido'),
                 'payment_status' => $request->input('payment_status', 'pendente'),
                 'payment_method' => $request->input('payment_method'),
@@ -89,6 +99,12 @@ class GpOrderController
                 'responsible' => $request->input('responsible'),
                 'notes' => $request->input('notes'),
             ]);
+
+            if ($isMulti) {
+                foreach ($items as $item) {
+                    $this->createItem($order->id, $item);
+                }
+            }
 
             try {
                 GpProductionOrder::create([
@@ -141,7 +157,7 @@ class GpOrderController
             return $order;
         });
 
-        $order->load(['files', 'events']);
+        $order->load(['files', 'events', 'items']);
 
         return response()->json(['message' => 'Pedido criado com sucesso.', 'order' => $order], 201);
     }
@@ -184,6 +200,12 @@ class GpOrderController
             return response()->json(['message' => 'Dados invalidos.', 'errors' => $validator->errors()], 422);
         }
 
+        $items = $this->parseItems($request->input('items'));
+        $itemErrors = $this->validateItems($items);
+        if (!empty($itemErrors)) {
+            return response()->json(['message' => 'Dados invalidos.', 'errors' => $itemErrors], 422);
+        }
+
         $oldStatus = $order->status;
         $oldArtStatus = $order->art_status;
         $data = $request->only([
@@ -193,7 +215,31 @@ class GpOrderController
             'deadline', 'responsible', 'notes',
         ]);
 
+        $isMulti = count($items) > 0;
+        if ($isMulti) {
+            $aggregate = $this->aggregatesFromItems($items);
+            $data['product_name'] = $aggregate['product_name'];
+            $data['product_size'] = $aggregate['product_size'];
+            $data['qty'] = $aggregate['qty'];
+            $data['sticker_qty'] = $aggregate['sticker_qty'];
+            $data['unit_price'] = $aggregate['unit_price'];
+            $data['total'] = $aggregate['total'];
+        }
+
         $order->update($data);
+
+        if ($isMulti) {
+            $order->items()->delete();
+            foreach ($items as $item) {
+                $this->createItem($order->id, $item);
+            }
+            GpOrderEvent::create([
+                'order_id' => $order->id,
+                'status' => $order->status,
+                'note' => 'Produtos do pedido atualizados (' . count($items) . ' item(ns))',
+                'created_by' => $user->name,
+            ]);
+        }
 
         if (isset($data['status']) && $data['status'] !== $oldStatus) {
             GpOrderEvent::create([
@@ -213,7 +259,7 @@ class GpOrderController
             ]);
         }
 
-        $order->load(['files', 'events']);
+        $order->load(['files', 'events', 'items']);
 
         return response()->json(['message' => 'Pedido atualizado com sucesso.', 'order' => $order]);
     }
@@ -239,5 +285,85 @@ class GpOrderController
         });
 
         return response()->json(['message' => 'Pedido excluido com sucesso.'], 204);
+    }
+
+    private function parseItems(mixed $items): array
+    {
+        if (is_string($items)) {
+            $decoded = json_decode($items, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+        return is_array($items) ? $items : [];
+    }
+
+    private function validateItems(array $items): array
+    {
+        $errors = [];
+        foreach ($items as $idx => $item) {
+            $label = 'items.' . $idx;
+            if (empty(trim((string) ($item['product_name'] ?? '')))) {
+                $errors[$label . '.product_name'] = 'O produto do item é obrigatório.';
+            }
+            $qty = (int) ($item['qty'] ?? 0);
+            if ($qty < 1) {
+                $errors[$label . '.qty'] = 'A quantidade do item deve ser pelo menos 1.';
+            }
+            $price = (float) ($item['unit_price'] ?? -1);
+            if ($price < 0) {
+                $errors[$label . '.unit_price'] = 'O preço unitário do item é inválido.';
+            }
+        }
+        return $errors;
+    }
+
+    private function aggregatesFromItems(array $items): array
+    {
+        $totalQty = 0;
+        $total = 0.0;
+        $stickerQty = 0;
+        $names = [];
+        $sizes = [];
+
+        foreach ($items as $item) {
+            $qty = max(1, (int) ($item['qty'] ?? 1));
+            $price = round((float) ($item['unit_price'] ?? 0), 2);
+            $totalQty += $qty;
+            $total += round($qty * $price, 2);
+            $stickerQty += (int) ($item['sticker_qty'] ?? 0);
+
+            $name = trim((string) ($item['product_name'] ?? ''));
+            $names[] = $qty > 1 ? ($qty . 'x ' . $name) : $name;
+
+            $size = trim((string) ($item['product_size'] ?? ''));
+            if ($size !== '' && !in_array($size, $sizes, true)) {
+                $sizes[] = $size;
+            }
+        }
+
+        return [
+            'product_name' => mb_substr(implode(', ', $names), 0, 255),
+            'product_size' => $sizes ? implode(', ', $sizes) : null,
+            'qty' => $totalQty,
+            'sticker_qty' => $stickerQty > 0 ? $stickerQty : null,
+            'unit_price' => $totalQty > 0 ? round($total / $totalQty, 2) : 0,
+            'total' => round($total, 2),
+        ];
+    }
+
+    private function createItem(int $orderId, array $item): void
+    {
+        $qty = max(1, (int) ($item['qty'] ?? 1));
+        $price = round((float) ($item['unit_price'] ?? 0), 2);
+
+        GpOrderItem::create([
+            'order_id' => $orderId,
+            'product_name' => trim((string) ($item['product_name'] ?? '')),
+            'product_size' => !empty($item['product_size']) ? (string) $item['product_size'] : null,
+            'description' => !empty($item['description']) ? (string) $item['description'] : null,
+            'qty' => $qty,
+            'sticker_qty' => !empty($item['sticker_qty']) ? (int) $item['sticker_qty'] : null,
+            'unit_price' => $price,
+            'total' => round($qty * $price, 2),
+        ]);
     }
 }
