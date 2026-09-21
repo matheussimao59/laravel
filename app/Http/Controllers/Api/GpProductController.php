@@ -74,8 +74,7 @@ class GpProductController
             'materials.*.cost_override' => ['nullable', 'numeric', 'min:0'],
             'discount_tiers' => ['nullable', 'array'],
             'discount_tiers.*.min_qty' => ['required_with:discount_tiers', 'integer', 'min:1'],
-            'discount_tiers.*.discount_type' => ['required_with:discount_tiers', 'in:percent,fixed'],
-            'discount_tiers.*.discount_value' => ['required_with:discount_tiers', 'numeric', 'min:0.01'],
+            'discount_tiers.*.unit_price' => ['required_with:discount_tiers', 'numeric', 'gt:0'],
         ]);
 
         if ($validator->fails()) {
@@ -176,8 +175,7 @@ class GpProductController
             'materials.*.cost_override' => ['nullable', 'numeric', 'min:0'],
             'discount_tiers' => ['nullable', 'array'],
             'discount_tiers.*.min_qty' => ['required_with:discount_tiers', 'integer', 'min:1'],
-            'discount_tiers.*.discount_type' => ['required_with:discount_tiers', 'in:percent,fixed'],
-            'discount_tiers.*.discount_value' => ['required_with:discount_tiers', 'numeric', 'min:0.01'],
+            'discount_tiers.*.unit_price' => ['required_with:discount_tiers', 'numeric', 'gt:0'],
         ]);
 
         if ($validator->fails()) {
@@ -243,11 +241,10 @@ class GpProductController
     private function syncDiscountTiers(GpProduct $product, Request $request): void
     {
         $tiers = collect($request->input('discount_tiers', []))
-            ->filter(fn ($t) => (int) ($t['min_qty'] ?? 0) >= 1 && (float) ($t['discount_value'] ?? 0) > 0)
+            ->filter(fn ($t) => (int) ($t['min_qty'] ?? 0) >= 1 && (float) ($t['unit_price'] ?? 0) > 0)
             ->map(fn ($t) => [
                 'min_qty' => (int) $t['min_qty'],
-                'discount_type' => in_array($t['discount_type'] ?? 'percent', ['percent', 'fixed'], true) ? $t['discount_type'] : 'percent',
-                'discount_value' => (float) $t['discount_value'],
+                'unit_price' => (float) $t['unit_price'],
             ])
             ->values();
 

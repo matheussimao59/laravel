@@ -14,15 +14,14 @@ class GpProductDiscountTier extends Model
     protected $fillable = [
         'product_id',
         'min_qty',
-        'discount_type',
-        'discount_value',
+        'unit_price',
     ];
 
     protected function casts(): array
     {
         return [
             'min_qty' => 'integer',
-            'discount_value' => 'decimal:2',
+            'unit_price' => 'decimal:2',
         ];
     }
 
