@@ -76,6 +76,11 @@ class GpProduct extends Model
         return $this->hasMany(GpQuoteItem::class, 'product_id');
     }
 
+    public function discountTiers()
+    {
+        return $this->hasMany(GpProductDiscountTier::class, 'product_id');
+    }
+
     public function getCalculatedCostMaterialsAttribute(): float
     {
         $total = 0.0;

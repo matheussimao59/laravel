@@ -43,6 +43,7 @@ class GpSaleController
             'payment_method' => ['nullable', 'string'],
             'payment_status' => ['nullable', 'string', 'in:pago,pendente'],
             'discount' => ['nullable', 'numeric', 'min:0'],
+            'received' => ['nullable', 'numeric', 'min:0'],
             'total' => ['required', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['nullable', 'integer'],
@@ -72,6 +73,7 @@ class GpSaleController
                 'payment_method' => $request->input('payment_method'),
                 'payment_status' => $request->input('payment_status', 'pendente'),
                 'discount' => $request->input('discount', 0),
+                'received' => $request->input('received', 0),
                 'total' => $request->input('total'),
             ]);
 

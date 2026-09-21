@@ -34,7 +34,7 @@ class GpProductController
 
         $products = $query->with(['materials' => function ($q) {
             $q->withPivot('qty_needed', 'cost_override');
-        }, 'cuttingMachine'])->get();
+        }, 'cuttingMachine', 'discountTiers'])->get();
 
         return response()->json(['products' => $products]);
     }
@@ -72,6 +72,10 @@ class GpProductController
             'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
             'materials.*.cost_override' => ['nullable', 'numeric', 'min:0'],
+            'discount_tiers' => ['nullable', 'array'],
+            'discount_tiers.*.min_qty' => ['required_with:discount_tiers', 'integer', 'min:1'],
+            'discount_tiers.*.discount_type' => ['required_with:discount_tiers', 'in:percent,fixed'],
+            'discount_tiers.*.discount_value' => ['required_with:discount_tiers', 'numeric', 'min:0.01'],
         ]);
 
         if ($validator->fails()) {
@@ -117,9 +121,13 @@ class GpProductController
                 $product->materials()->sync($materialData);
             }
 
+            if ($request->has('discount_tiers')) {
+                $this->syncDiscountTiers($product, $request);
+            }
+
             DB::commit();
 
-            $product->load('materials');
+            $product->load(['materials', 'discountTiers']);
 
             return response()->json(['message' => 'Produto criado com sucesso.', 'product' => $product], 201);
         } catch (\Exception $e) {
@@ -166,6 +174,10 @@ class GpProductController
             'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
             'materials.*.cost_override' => ['nullable', 'numeric', 'min:0'],
+            'discount_tiers' => ['nullable', 'array'],
+            'discount_tiers.*.min_qty' => ['required_with:discount_tiers', 'integer', 'min:1'],
+            'discount_tiers.*.discount_type' => ['required_with:discount_tiers', 'in:percent,fixed'],
+            'discount_tiers.*.discount_value' => ['required_with:discount_tiers', 'numeric', 'min:0.01'],
         ]);
 
         if ($validator->fails()) {
@@ -194,9 +206,13 @@ class GpProductController
                 $product->materials()->sync($materialData);
             }
 
+            if ($request->has('discount_tiers')) {
+                $this->syncDiscountTiers($product, $request);
+            }
+
             DB::commit();
 
-            $product->load('materials');
+            $product->load(['materials', 'discountTiers']);
 
             return response()->json(['message' => 'Produto atualizado com sucesso.', 'product' => $product]);
         } catch (\Exception $e) {
@@ -218,8 +234,24 @@ class GpProductController
         }
 
         $product->materials()->detach();
+        $product->discountTiers()->delete();
         $product->delete();
 
         return response()->json(['message' => 'Produto excluido com sucesso.'], 204);
+    }
+
+    private function syncDiscountTiers(GpProduct $product, Request $request): void
+    {
+        $tiers = collect($request->input('discount_tiers', []))
+            ->filter(fn ($t) => (int) ($t['min_qty'] ?? 0) >= 1 && (float) ($t['discount_value'] ?? 0) > 0)
+            ->map(fn ($t) => [
+                'min_qty' => (int) $t['min_qty'],
+                'discount_type' => in_array($t['discount_type'] ?? 'percent', ['percent', 'fixed'], true) ? $t['discount_type'] : 'percent',
+                'discount_value' => (float) $t['discount_value'],
+            ])
+            ->values();
+
+        $product->discountTiers()->delete();
+        $product->discountTiers()->createMany($tiers);
     }
 }

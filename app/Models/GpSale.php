@@ -20,6 +20,7 @@ class GpSale extends Model
         'payment_status',
         'delivery_date',
         'discount',
+        'received',
         'total',
     ];
 
@@ -27,6 +28,7 @@ class GpSale extends Model
     {
         return [
             'discount' => 'decimal:2',
+            'received' => 'decimal:2',
             'total' => 'decimal:2',
             'delivery_date' => 'date',
         ];
