@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 final class ManualPrintOrderController
@@ -174,6 +175,40 @@ final class ManualPrintOrderController
         DB::table('manual_print_orders')->where('id', (int) $order)->delete();
 
         return response()->json(['message' => 'Pedido de impressao excluido com sucesso.', 'id' => $order]);
+    }
+
+    public function uploadOrderImage(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'image' => ['required', 'file', 'mimes:jpg,jpeg,png', 'max:20480'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['message' => 'Envie uma imagem PNG ou JPG de ate 20 MB.', 'errors' => $validator->errors()], 422);
+        }
+
+        $file = $request->file('image');
+        if ($file->getError() !== UPLOAD_ERR_OK) {
+            return response()->json([
+                'message' => 'Falha no upload da imagem. Tente novamente com um arquivo menor.',
+                'errors' => ['image' => 'Upload falhou com erro: ' . $file->getError()],
+            ], 422);
+        }
+
+        $path = $file->store('impressao/images', 'public');
+        if (!$path) {
+            return response()->json(['message' => 'Falha ao salvar a imagem no servidor.'], 500);
+        }
+
+        return response()->json([
+            'message' => 'Imagem enviada com sucesso.',
+            'url' => Storage::disk('public')->url(preg_replace("#^public/#", "", $path)),
+        ]);
     }
 
     private function findOwnedRow(Request $request, string $order): ?object

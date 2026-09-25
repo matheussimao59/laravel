@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\FiscalSettingController;
 use App\Http\Controllers\Api\FinancialController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\ManualPrintOrderController;
+use App\Http\Controllers\Api\MediaController;
 use App\Http\Controllers\Api\LocalPrintJobController;
 use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\MercadoLivreConfigController;
@@ -151,6 +152,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('product-matrices', ProductMatrixController::class)->parameter('product-matrices', 'matrix');
     Route::apiResource('calendar/orders', CalendarOrderController::class)->parameter('orders', 'order')->names('calendar.orders');
     Route::apiResource('impressao/orders', ManualPrintOrderController::class)->parameter('orders', 'order')->only(['index', 'store', 'update', 'destroy'])->names('impressao.orders');
+    Route::post('/impressao/order-images', [ManualPrintOrderController::class, 'uploadOrderImage']);
+    Route::get('/media/file', [MediaController::class, 'file']);
     Route::get('/print/jobs', [LocalPrintJobController::class, 'index']);
     Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
     Route::post('/print/jobs/clear-history', [LocalPrintJobController::class, 'clearCompleted']);
