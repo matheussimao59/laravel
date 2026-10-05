@@ -49,7 +49,7 @@ class GpArtePlotterController
             return null;
         }
 
-        return GpArtePlotter::where('id', $id)->where('user_id', $user->id)->first();
+        return GpArtePlotter::where('id', $id)->where('user_id', $user->id)->firstOrFail();
     }
 
     public function index(Request $request): JsonResponse
