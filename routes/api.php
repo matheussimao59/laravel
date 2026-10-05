@@ -34,6 +34,7 @@ use App\Http\Controllers\Api\GpMaterialController;
 use App\Http\Controllers\Api\GpCuttingMachineController;
 use App\Http\Controllers\Api\GpProofController;
 use App\Http\Controllers\Api\GpSaleController;
+use App\Http\Controllers\Api\GpArtePlotterController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
@@ -269,5 +270,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/cutting-machines', [GpCuttingMachineController::class, 'store']);
         Route::put('/cutting-machines/{machine}', [GpCuttingMachineController::class, 'update']);
         Route::delete('/cutting-machines/{machine}', [GpCuttingMachineController::class, 'destroy']);
+
+        // Artes de plotter (marcas circulares + editor de elementos em mm)
+        Route::get('/arte-plotter', [GpArtePlotterController::class, 'index']);
+        Route::post('/arte-plotter', [GpArtePlotterController::class, 'store']);
+        Route::get('/arte-plotter/{art}', [GpArtePlotterController::class, 'show']);
+        Route::put('/arte-plotter/{art}', [GpArtePlotterController::class, 'update']);
+        Route::delete('/arte-plotter/{art}', [GpArtePlotterController::class, 'destroy']);
     });
 });
