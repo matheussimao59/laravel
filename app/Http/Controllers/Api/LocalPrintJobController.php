@@ -40,6 +40,7 @@ final class LocalPrintJobController
 
         $validator = Validator::make($request->all(), [
             'manual_print_order_id' => ['nullable', 'integer', 'exists:manual_print_orders,id'],
+            'name' => ['nullable', 'string', 'max:255'],
             'printer_name' => ['nullable', 'string', 'max:180'],
             'page_order' => ['nullable', 'string', 'in:normal,reverse'],
             'print_profile' => ['nullable', 'array'],
@@ -96,6 +97,10 @@ final class LocalPrintJobController
 
         if ($this->hasPrintSideColumn()) {
             $insertData['print_side'] = $printSide;
+        }
+
+        if ($this->hasNameColumn()) {
+            $insertData['name'] = $request->filled('name') ? trim((string) $request->input('name')) : null;
         }
 
         $jobId = DB::table('local_print_jobs')->insertGetId($insertData);
@@ -642,6 +647,7 @@ final class LocalPrintJobController
         $payload = [
             'id' => (string) $row->id,
             'manualPrintOrderId' => $row->manual_print_order_id ? (string) $row->manual_print_order_id : null,
+            'name' => $row->name ?? null,
             'printerName' => $row->printer_name,
             'pageOrder' => $row->page_order,
             'printProfile' => $this->decodePrintProfile($row->print_profile ?? null),
@@ -677,6 +683,16 @@ final class LocalPrintJobController
         static $hasColumn = null;
         if ($hasColumn === null) {
             $hasColumn = Schema::hasColumn('local_print_jobs', 'print_side');
+        }
+
+        return $hasColumn;
+    }
+
+    private function hasNameColumn(): bool
+    {
+        static $hasColumn = null;
+        if ($hasColumn === null) {
+            $hasColumn = Schema::hasColumn('local_print_jobs', 'name');
         }
 
         return $hasColumn;
