@@ -156,6 +156,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/print/jobs', [LocalPrintJobController::class, 'store']);
     Route::post('/print/jobs/clear-history', [LocalPrintJobController::class, 'clearCompleted']);
     Route::post('/print/jobs/{job}/retry', [LocalPrintJobController::class, 'retry']);
+    Route::post('/print/jobs/{job}/release', [LocalPrintJobController::class, 'release']);
     Route::post('/print/jobs/{job}/cancel', [LocalPrintJobController::class, 'cancel']);
     Route::post('/print-agent/profiles/{profile}/capture', [LocalPrintJobController::class, 'captureProfile']);
 

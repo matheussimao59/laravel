@@ -73,7 +73,8 @@ final class LocalPrintJobController
         }
 
         $printSide = $request->input('print_side', 'front') === 'back' ? 'back' : 'front';
-        if ($orderId && $this->hasPrintSideColumn()) {
+        $saveOnly = $request->boolean('save_only');
+        if ($orderId && !$saveOnly && $this->hasPrintSideColumn()) {
             DB::table('local_print_jobs')
                 ->where('user_id', $user->id)
                 ->where('manual_print_order_id', (int) $orderId)
@@ -89,7 +90,7 @@ final class LocalPrintJobController
             'page_order' => $request->input('page_order', 'normal'),
             'print_profile' => $request->has('print_profile') ? json_encode($request->input('print_profile')) : null,
             'copies' => (int) $request->input('copies', 1),
-            'status' => 'pending',
+            'status' => $saveOnly ? 'saved' : 'pending',
             'document_html' => $request->input('document_html'),
             'created_at' => now(),
             'updated_at' => now(),
@@ -270,6 +271,30 @@ final class LocalPrintJobController
         ]);
     }
 
+    public function release(Request $request, string $job): JsonResponse
+    {
+        $row = $this->jobForAuthenticatedUser($request, $job);
+        if ($row instanceof JsonResponse) {
+            return $row;
+        }
+        if ($row->status !== 'saved') {
+            return response()->json(['message' => 'Somente trabalhos salvos podem ser enviados para impressao.'], 422);
+        }
+
+        DB::table('local_print_jobs')->where('id', $row->id)->update([
+            'status' => 'pending',
+            'error_message' => null,
+            'picked_at' => null,
+            'printed_at' => null,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Trabalho salvo enviado para a fila de impressao.',
+            'job' => $this->mapJob(DB::table('local_print_jobs')->where('id', $row->id)->first(), false),
+        ]);
+    }
+
     public function clearCompleted(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -296,7 +321,7 @@ final class LocalPrintJobController
         if ($row instanceof JsonResponse) {
             return $row;
         }
-        if (!in_array($row->status, ['pending', 'processing', 'failed'], true)) {
+        if (!in_array($row->status, ['saved', 'pending', 'processing', 'failed'], true)) {
             return response()->json(['message' => 'Este trabalho nao pode mais ser cancelado.'], 422);
         }
 
