@@ -88,7 +88,7 @@ class GpArtePlotterController
 
         $items = $request->input('items', []);
         $marks = $request->input('marks', []);
-        $hideDefaultMarks = filter_var($request->input('hide_default_marks', false), FILTER_VALIDATE_BOOLEAN);
+        $hideDefaultMarks = (bool) $request->boolean('hide_default_marks');
 
         $art = GpArtePlotter::create([
             'user_id' => $user->id,
@@ -142,7 +142,11 @@ class GpArtePlotterController
         $payload = [];
         foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm', 'marks', 'hide_default_marks'] as $field) {
             if ($request->has($field)) {
-                $payload[$field] = $request->input($field);
+                if ($field === 'hide_default_marks') {
+                    $payload[$field] = (bool) $request->boolean($field);
+                } else {
+                    $payload[$field] = $request->input($field);
+                }
             }
         }
         if (isset($payload['name'])) {
