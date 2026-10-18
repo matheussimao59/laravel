@@ -21,6 +21,7 @@ class GpArtePlotter extends Model
         'sheet_height_mm',
         'items',
         'marks',
+        'hide_default_marks',
         'item_count',
     ];
 
@@ -29,6 +30,7 @@ class GpArtePlotter extends Model
         return [
             'items' => 'array',
             'marks' => 'array',
+            'hide_default_marks' => 'boolean',
             'sheet_width_mm' => 'decimal:2',
             'sheet_height_mm' => 'decimal:2',
             'item_count' => 'integer',

@@ -46,6 +46,7 @@ class GpArtePlotterController
             'marks.*.cyMm' => ['nullable', 'numeric', 'min:0', 'max:5000'],
             'marks.*.diameterMm' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'marks.*.corner' => ['nullable', 'string', 'max:50'],
+            'hide_default_marks' => ['nullable', 'boolean'],
         ];
     }
 
@@ -87,6 +88,7 @@ class GpArtePlotterController
 
         $items = $request->input('items', []);
         $marks = $request->input('marks', []);
+        $hideDefaultMarks = filter_var($request->input('hide_default_marks', false), FILTER_VALIDATE_BOOLEAN);
 
         $art = GpArtePlotter::create([
             'user_id' => $user->id,
@@ -98,6 +100,7 @@ class GpArtePlotterController
             'sheet_height_mm' => $request->input('sheet_height_mm', 0),
             'items' => $items,
             'marks' => $marks,
+            'hide_default_marks' => $hideDefaultMarks,
             'item_count' => count($items),
         ]);
 
@@ -137,7 +140,7 @@ class GpArtePlotterController
         }
 
         $payload = [];
-        foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm', 'marks'] as $field) {
+        foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm', 'marks', 'hide_default_marks'] as $field) {
             if ($request->has($field)) {
                 $payload[$field] = $request->input($field);
             }
