@@ -40,13 +40,6 @@ class GpArtePlotterController
             'items.*.text' => ['nullable', 'string', 'max:2000'],
             'items.*.src' => ['nullable', 'string'],
             'items.*.slots' => ['nullable', 'array'],
-            'marks' => ['nullable', 'array'],
-            'marks.*.id' => ['nullable', 'string', 'max:80'],
-            'marks.*.cxMm' => ['nullable', 'numeric', 'min:0', 'max:5000'],
-            'marks.*.cyMm' => ['nullable', 'numeric', 'min:0', 'max:5000'],
-            'marks.*.diameterMm' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'marks.*.corner' => ['nullable', 'string', 'max:50'],
-            'hide_default_marks' => ['nullable', 'boolean'],
         ];
     }
 
@@ -87,8 +80,6 @@ class GpArtePlotterController
         }
 
         $items = $request->input('items', []);
-        $marks = $request->input('marks', []);
-        $hideDefaultMarks = (bool) $request->boolean('hide_default_marks');
 
         $art = GpArtePlotter::create([
             'user_id' => $user->id,
@@ -99,8 +90,6 @@ class GpArtePlotterController
             'sheet_width_mm' => $request->input('sheet_width_mm', 0),
             'sheet_height_mm' => $request->input('sheet_height_mm', 0),
             'items' => $items,
-            'marks' => $marks,
-            'hide_default_marks' => $hideDefaultMarks,
             'item_count' => count($items),
         ]);
 
@@ -140,13 +129,9 @@ class GpArtePlotterController
         }
 
         $payload = [];
-        foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm', 'marks', 'hide_default_marks'] as $field) {
+        foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm'] as $field) {
             if ($request->has($field)) {
-                if ($field === 'hide_default_marks') {
-                    $payload[$field] = (bool) $request->boolean($field);
-                } else {
-                    $payload[$field] = $request->input($field);
-                }
+                $payload[$field] = $request->input($field);
             }
         }
         if (isset($payload['name'])) {

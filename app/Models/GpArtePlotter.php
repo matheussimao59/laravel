@@ -20,8 +20,6 @@ class GpArtePlotter extends Model
         'sheet_width_mm',
         'sheet_height_mm',
         'items',
-        'marks',
-        'hide_default_marks',
         'item_count',
     ];
 
@@ -29,8 +27,6 @@ class GpArtePlotter extends Model
     {
         return [
             'items' => 'array',
-            'marks' => 'array',
-            'hide_default_marks' => 'boolean',
             'sheet_width_mm' => 'decimal:2',
             'sheet_height_mm' => 'decimal:2',
             'item_count' => 'integer',
@@ -38,9 +34,9 @@ class GpArtePlotter extends Model
     }
 
     /**
-     * As marcas circulares padrão nao sao persistidas: sao sempre derivadas de
+     * As marcas circulares padrão não são persistidas: são sempre derivadas de
      * sheet_format + orientation. As marcas de registro importadas de SVG
-     * (pontos pretos) sao persistidas neste campo.
+     * (pontos pretos) são salvas dentro do campo items (kind: marcas_registro).
      */
     public function user()
     {
