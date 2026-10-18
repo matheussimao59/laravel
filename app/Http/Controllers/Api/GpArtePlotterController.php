@@ -39,6 +39,13 @@ class GpArtePlotterController
             'items.*.zIndex' => ['nullable', 'integer'],
             'items.*.text' => ['nullable', 'string', 'max:2000'],
             'items.*.src' => ['nullable', 'string'],
+            'items.*.slots' => ['nullable', 'array'],
+            'marks' => ['nullable', 'array'],
+            'marks.*.id' => ['nullable', 'string', 'max:80'],
+            'marks.*.cxMm' => ['nullable', 'numeric', 'min:0', 'max:5000'],
+            'marks.*.cyMm' => ['nullable', 'numeric', 'min:0', 'max:5000'],
+            'marks.*.diameterMm' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'marks.*.corner' => ['nullable', 'string', 'max:50'],
         ];
     }
 
@@ -79,6 +86,7 @@ class GpArtePlotterController
         }
 
         $items = $request->input('items', []);
+        $marks = $request->input('marks', []);
 
         $art = GpArtePlotter::create([
             'user_id' => $user->id,
@@ -89,6 +97,7 @@ class GpArtePlotterController
             'sheet_width_mm' => $request->input('sheet_width_mm', 0),
             'sheet_height_mm' => $request->input('sheet_height_mm', 0),
             'items' => $items,
+            'marks' => $marks,
             'item_count' => count($items),
         ]);
 
@@ -128,7 +137,7 @@ class GpArtePlotterController
         }
 
         $payload = [];
-        foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm'] as $field) {
+        foreach (['name', 'machine', 'sheet_format', 'orientation', 'sheet_width_mm', 'sheet_height_mm', 'marks'] as $field) {
             if ($request->has($field)) {
                 $payload[$field] = $request->input($field);
             }
