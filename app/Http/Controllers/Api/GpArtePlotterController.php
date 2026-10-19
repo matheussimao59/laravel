@@ -29,7 +29,7 @@ class GpArtePlotterController
             'sheet_height_mm' => [$nullable, 'numeric', 'min:0', 'max:5000'],
             'items' => [$nullable, 'array', 'max:500'],
             'items.*.id' => ['required', 'string', 'max:80'],
-            'items.*.kind' => ['required', 'string', 'in:texto,imagem,forma,gabarito'],
+            'items.*.kind' => ['required', 'string', 'in:texto,imagem,forma,gabarito,marcas_registro'],
             'items.*.name' => ['nullable', 'string', 'max:255'],
             'items.*.xMm' => ['required', 'numeric', 'min:0', 'max:5000'],
             'items.*.yMm' => ['required', 'numeric', 'min:0', 'max:5000'],
@@ -40,6 +40,7 @@ class GpArtePlotterController
             'items.*.text' => ['nullable', 'string', 'max:2000'],
             'items.*.src' => ['nullable', 'string'],
             'items.*.slots' => ['nullable', 'array'],
+            'items.*.marks' => ['nullable', 'array'],
         ];
     }
 
