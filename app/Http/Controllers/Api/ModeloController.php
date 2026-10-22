@@ -274,6 +274,7 @@ final class ModeloController
         }
 
         $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
             'editor_state' => ['nullable'],
             'pdf_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
@@ -291,6 +292,13 @@ final class ModeloController
         $updates = [
             'updated_at' => now(),
         ];
+
+        if ($request->has('name')) {
+            $newName = trim((string) ($validated['name'] ?? ''));
+            if ($newName !== '') {
+                $updates['name'] = mb_strimwidth($newName, 0, 255);
+            }
+        }
 
         if ($request->has('editor_state')) {
             $editorState = $validated['editor_state'] ?? null;
