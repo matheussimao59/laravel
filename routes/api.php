@@ -168,6 +168,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/fiscal/documents/{document}', [FiscalDocumentController::class, 'destroy']);
 
     Route::get('/modelos', [ModeloController::class, 'index']);
+    Route::get('/modelos-file/{path}', [ModeloController::class, 'serveArt'])->where('path', '.*');
     Route::post('/modelos', [ModeloController::class, 'store']);
     Route::get('/modelos/access-users', [ModeloController::class, 'accessUsers']);
     Route::post('/modelos/access-users', [ModeloController::class, 'updateBulkAccessUsers']);

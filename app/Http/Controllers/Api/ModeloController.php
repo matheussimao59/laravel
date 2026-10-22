@@ -227,6 +227,21 @@ final class ModeloController
         ]);
     }
 
+    public function serveArt(Request $request, string $path)
+    {
+        $cleanPath = str_replace('\\', '/', urldecode($path));
+
+        if (str_contains($cleanPath, '..') || !str_starts_with($cleanPath, 'modelos/') || trim($cleanPath) !== $cleanPath) {
+            return response()->json(['message' => 'Arquivo nao encontrado.'], 404);
+        }
+
+        if (!Storage::disk('public')->exists($cleanPath)) {
+            return response()->json(['message' => 'Arquivo nao encontrado.'], 404);
+        }
+
+        return Storage::disk('public')->response($cleanPath);
+    }
+
     public function show(Request $request, $modelo): JsonResponse
     {
         $user = $request->user();

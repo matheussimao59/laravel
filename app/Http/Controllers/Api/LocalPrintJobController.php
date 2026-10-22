@@ -19,6 +19,11 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
+        }
+
         $limit = max(1, min(200, (int) $request->input('limit', 80)));
         $rows = DB::table('local_print_jobs')
             ->where('user_id', $user->id)
@@ -36,6 +41,11 @@ final class LocalPrintJobController
         $user = $request->user();
         if (!$user) {
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
         }
 
         $validator = Validator::make($request->all(), [
@@ -121,6 +131,11 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
+        }
+
         $this->touchAgentHeartbeat($userId);
 
         $limit = max(1, min(10, (int) $request->input('limit', 1)));
@@ -204,6 +219,11 @@ final class LocalPrintJobController
         $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
         if (!$userId) {
             return response()->json(['message' => 'Token do agente invalido.'], 401);
+        }
+
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
         }
 
         $validator = Validator::make($request->all(), [
@@ -300,6 +320,11 @@ final class LocalPrintJobController
         $user = $request->user();
         if (!$user) {
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
         }
 
         $deleted = DB::table('local_print_jobs')
@@ -402,6 +427,11 @@ final class LocalPrintJobController
             return response()->json(['message' => 'Token do agente invalido.'], 401);
         }
 
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
+        }
+
         $this->touchAgentHeartbeat($userId);
 
         $config = $this->agentConfigForUser($userId);
@@ -432,6 +462,11 @@ final class LocalPrintJobController
         $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
         if (!$userId) {
             return response()->json(['message' => 'Token do agente invalido.'], 401);
+        }
+
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
         }
 
         $validator = Validator::make($request->all(), [
@@ -486,6 +521,11 @@ final class LocalPrintJobController
         $userId = $this->userIdFromAgentToken((string) $request->bearerToken());
         if (!$userId) {
             return response()->json(['message' => 'Token do agente invalido.'], 401);
+        }
+
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
         }
 
         $validator = Validator::make($request->all(), [
@@ -546,6 +586,11 @@ final class LocalPrintJobController
         $user = $request->user();
         if (!$user) {
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
+        }
+
+        $blocked = $this->requirePrintJobsTables();
+        if ($blocked) {
+            return $blocked;
         }
 
         $row = DB::table('local_print_jobs')
@@ -711,6 +756,27 @@ final class LocalPrintJobController
         }
 
         return $hasColumn;
+    }
+
+    private function hasPrintJobsTables(): bool
+    {
+        static $hasTables = null;
+        if ($hasTables === null) {
+            $hasTables = Schema::hasTable('local_print_jobs') && Schema::hasTable('manual_print_orders');
+        }
+
+        return $hasTables;
+    }
+
+    private function requirePrintJobsTables(): ?JsonResponse
+    {
+        if ($this->hasPrintJobsTables()) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'Atualize o banco de dados do servidor (php artisan migrate) para usar a fila de impressao.',
+        ], 409);
     }
 
     private function hasNameColumn(): bool
