@@ -17,8 +17,16 @@ final class ModeloController
             return response()->json(['message' => 'Usuario nao autenticado.'], 401);
         }
 
+        $columns = ['modelos.id', 'modelos.user_id', 'modelos.name', 'modelos.sheet_size', 'modelos.orientation', 'modelos.pdf_name', 'modelos.pdf_path', 'modelos.verso_name', 'modelos.verso_path', 'modelos.is_shared', 'modelos.shared_at', 'modelos.created_at'];
+
+        if ($this->hasRuleColumns()) {
+            $columns[] = 'modelos.rule_name';
+            $columns[] = 'modelos.rule_qty';
+        }
+
         $modelsQuery = DB::table('modelos')
-            ->select('modelos.id', 'modelos.user_id', 'modelos.name', 'modelos.sheet_size', 'modelos.orientation', 'modelos.pdf_name', 'modelos.pdf_path', 'modelos.verso_name', 'modelos.verso_path', 'modelos.is_shared', 'modelos.shared_at', 'modelos.created_at')
+            ->select($columns)
+
             ->where(function ($query) use ($user) {
                 $query->where('modelos.user_id', $user->id);
 
@@ -58,6 +66,8 @@ final class ModeloController
             'orientation' => ['required', 'string', 'max:50'],
             'pdf_base' => ['required', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
+            'rule_name' => ['nullable', 'string', 'max:255'],
+            'rule_qty' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $pdfPath = null;
@@ -94,7 +104,7 @@ final class ModeloController
             $versoPath = $versoFile->store('modelos', 'public');
         }
 
-        $id = DB::table('modelos')->insertGetId([
+        $insertData = [
             'user_id' => $user->id,
             'name' => trim($validated['name']),
             'sheet_size' => trim($validated['sheet_size']),
@@ -106,7 +116,16 @@ final class ModeloController
             'editor_state' => json_encode($this->defaultEditorState()),
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($this->hasRuleColumns()) {
+            $insertData['rule_name'] = isset($validated['rule_name']) && trim((string) $validated['rule_name']) !== ''
+                ? mb_strimwidth(trim((string) $validated['rule_name']), 0, 255)
+                : null;
+            $insertData['rule_qty'] = $validated['rule_qty'] ?? null;
+        }
+
+        $id = DB::table('modelos')->insertGetId($insertData);
 
         $row = DB::table('modelos')->where('id', $id)->first();
 
@@ -164,7 +183,7 @@ final class ModeloController
             }
         }
 
-        $id = DB::table('modelos')->insertGetId([
+        $insertData = [
             'user_id' => (int) $user->id,
             'name' => $newName,
             'sheet_size' => trim($validated['sheet_size'] ?? $row->sheet_size),
@@ -176,7 +195,14 @@ final class ModeloController
             'editor_state' => ($row->editor_state ?? null),
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        if ($this->hasRuleColumns()) {
+            $insertData['rule_name'] = $row->rule_name ?? null;
+            $insertData['rule_qty'] = $row->rule_qty ?? null;
+        }
+
+        $id = DB::table('modelos')->insertGetId($insertData);
 
         $newRow = DB::table('modelos')->where('id', $id)->first();
 
@@ -237,6 +263,8 @@ final class ModeloController
             'pdf_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'remove_verso' => ['nullable'],
+            'rule_name' => ['nullable', 'string', 'max:255'],
+            'rule_qty' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $row = $this->getOwnedModelForUser($request, $modelo);
@@ -255,6 +283,18 @@ final class ModeloController
                 $editorState = is_array($decoded) ? $decoded : null;
             }
             $updates['editor_state'] = $editorState ? json_encode($editorState) : null;
+        }
+
+        if ($this->hasRuleColumns()) {
+            if ($request->has('rule_name')) {
+                $ruleName = $validated['rule_name'] ?? null;
+                $updates['rule_name'] = $ruleName !== null && trim((string) $ruleName) !== ''
+                    ? mb_strimwidth(trim((string) $ruleName), 0, 255)
+                    : null;
+            }
+            if ($request->has('rule_qty')) {
+                $updates['rule_qty'] = $validated['rule_qty'] ?? null;
+            }
         }
 
         if ($request->hasFile('pdf_base')) {
@@ -587,6 +627,8 @@ final class ModeloController
             'verso_name' => ($row->verso_name ?? null) ? (string) $row->verso_name : null,
             'verso_url' => ($row->verso_path ?? null) ? Storage::disk('public')->url(preg_replace("#^public/#","", $row->verso_path)) : null,
             'editor_state' => ($includeEditorState && $row->editor_state) ? json_decode($row->editor_state, true) : null,
+            'rule_name' => (property_exists($row, 'rule_name') && $row->rule_name !== null) ? (string) $row->rule_name : null,
+            'rule_qty' => (property_exists($row, 'rule_qty') && $row->rule_qty !== null) ? (int) $row->rule_qty : null,
             'is_shared' => $isShared,
             'shared_at' => property_exists($row, 'shared_at') ? $row->shared_at : null,
             'is_owner' => $isOwner,
@@ -603,6 +645,16 @@ final class ModeloController
         static $hasColumns = null;
         if ($hasColumns === null) {
             $hasColumns = Schema::hasColumn('modelos', 'is_shared') && Schema::hasColumn('modelos', 'shared_at');
+        }
+
+        return $hasColumns;
+    }
+
+    private function hasRuleColumns(): bool
+    {
+        static $hasColumns = null;
+        if ($hasColumns === null) {
+            $hasColumns = Schema::hasColumn('modelos', 'rule_name') && Schema::hasColumn('modelos', 'rule_qty');
         }
 
         return $hasColumns;
