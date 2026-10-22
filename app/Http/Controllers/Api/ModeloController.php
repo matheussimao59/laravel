@@ -24,6 +24,10 @@ final class ModeloController
             $columns[] = 'modelos.rule_qty';
         }
 
+        if ($this->hasRuleThemeColumn()) {
+            $columns[] = 'modelos.rule_theme';
+        }
+
         $modelsQuery = DB::table('modelos')
             ->select($columns)
 
@@ -68,6 +72,7 @@ final class ModeloController
             'verso_base' => ['nullable', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:20480'],
             'rule_name' => ['nullable', 'string', 'max:255'],
             'rule_qty' => ['nullable', 'integer', 'min:1'],
+            'rule_theme' => ['nullable', 'string', 'max:255'],
         ]);
 
         $pdfPath = null;
@@ -123,6 +128,12 @@ final class ModeloController
                 ? mb_strimwidth(trim((string) $validated['rule_name']), 0, 255)
                 : null;
             $insertData['rule_qty'] = $validated['rule_qty'] ?? null;
+        }
+
+        if ($this->hasRuleThemeColumn()) {
+            $insertData['rule_theme'] = isset($validated['rule_theme']) && trim((string) $validated['rule_theme']) !== ''
+                ? mb_strimwidth(trim((string) $validated['rule_theme']), 0, 255)
+                : null;
         }
 
         $id = DB::table('modelos')->insertGetId($insertData);
@@ -202,6 +213,10 @@ final class ModeloController
             $insertData['rule_qty'] = $row->rule_qty ?? null;
         }
 
+        if ($this->hasRuleThemeColumn()) {
+            $insertData['rule_theme'] = $row->rule_theme ?? null;
+        }
+
         $id = DB::table('modelos')->insertGetId($insertData);
 
         $newRow = DB::table('modelos')->where('id', $id)->first();
@@ -265,6 +280,7 @@ final class ModeloController
             'remove_verso' => ['nullable'],
             'rule_name' => ['nullable', 'string', 'max:255'],
             'rule_qty' => ['nullable', 'integer', 'min:1'],
+            'rule_theme' => ['nullable', 'string', 'max:255'],
         ]);
 
         $row = $this->getOwnedModelForUser($request, $modelo);
@@ -294,6 +310,15 @@ final class ModeloController
             }
             if ($request->has('rule_qty')) {
                 $updates['rule_qty'] = $validated['rule_qty'] ?? null;
+            }
+        }
+
+        if ($this->hasRuleThemeColumn()) {
+            if ($request->has('rule_theme')) {
+                $ruleTheme = $validated['rule_theme'] ?? null;
+                $updates['rule_theme'] = $ruleTheme !== null && trim((string) $ruleTheme) !== ''
+                    ? mb_strimwidth(trim((string) $ruleTheme), 0, 255)
+                    : null;
             }
         }
 
@@ -629,6 +654,7 @@ final class ModeloController
             'editor_state' => ($includeEditorState && $row->editor_state) ? json_decode($row->editor_state, true) : null,
             'rule_name' => (property_exists($row, 'rule_name') && $row->rule_name !== null) ? (string) $row->rule_name : null,
             'rule_qty' => (property_exists($row, 'rule_qty') && $row->rule_qty !== null) ? (int) $row->rule_qty : null,
+            'rule_theme' => (property_exists($row, 'rule_theme') && $row->rule_theme !== null) ? (string) $row->rule_theme : null,
             'is_shared' => $isShared,
             'shared_at' => property_exists($row, 'shared_at') ? $row->shared_at : null,
             'is_owner' => $isOwner,
@@ -658,6 +684,16 @@ final class ModeloController
         }
 
         return $hasColumns;
+    }
+
+    private function hasRuleThemeColumn(): bool
+    {
+        static $hasColumn = null;
+        if ($hasColumn === null) {
+            $hasColumn = Schema::hasColumn('modelos', 'rule_theme');
+        }
+
+        return $hasColumn;
     }
 
     private function hasAccessTable(): bool
