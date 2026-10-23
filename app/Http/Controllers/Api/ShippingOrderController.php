@@ -718,6 +718,8 @@ final class ShippingOrderController
 
         $normalizedOrderNumber = $this->normalizeImportedOrderNumber(trim((string) $platformOrderNumber));
         $incomingIdentity = $this->importedItemIdentity($incomingRow);
+        $incomingFullIdentity = $this->importedItemFullIdentity($incomingRow);
+        $incomingAdBlank = $this->isBlank($incomingRow['ad_name'] ?? null);
         if ($normalizedOrderNumber !== '') {
             $candidates = DB::table('shipping_orders')
                 ->where('user_id', $userId)
@@ -736,9 +738,21 @@ final class ShippingOrderController
                 ->limit(50)
                 ->get();
 
+            // 1) Mesmo item (sku + anuncio + variacao). Permite dois produtos do MESMO pedido
+            //    com o mesmo SKU sobreviverem como linhas separadas (pedidos em grupo).
             foreach ($candidates as $candidate) {
-                if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
+                if ($incomingFullIdentity !== '' && $this->importedItemFullIdentity($candidate) === $incomingFullIdentity) {
                     return $candidate;
+                }
+            }
+
+            // 2) Retaguarda legado: sem nome de anuncio na linha nova nao ha como distinguir itens,
+            //    entao combina pela identidade antiga (apenas sku).
+            if ($incomingAdBlank) {
+                foreach ($candidates as $candidate) {
+                    if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
+                        return $candidate;
+                    }
                 }
             }
 
@@ -775,8 +789,16 @@ final class ShippingOrderController
             ->get();
 
         foreach ($candidates as $candidate) {
-            if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
+            if ($incomingFullIdentity !== '' && $this->importedItemFullIdentity($candidate) === $incomingFullIdentity) {
                 return $candidate;
+            }
+        }
+
+        if ($incomingAdBlank) {
+            foreach ($candidates as $candidate) {
+                if ($this->importedItemIdentity($candidate) === $incomingIdentity) {
+                    return $candidate;
+                }
             }
         }
 
@@ -807,6 +829,34 @@ final class ShippingOrderController
         $identity = trim($title . '|' . $variant, '|');
 
         return $identity === '' ? '' : 'item:' . $identity;
+    }
+
+    /**
+     * Identidade COMPLETA do item: sku + anuncio + variacao.
+     * Pedidos em grupo tem produtos diferentes com o MESMO SKU; a identidade completa
+     * evita que a importacao junte as duas linhas em uma so.
+     */
+    private function importedItemFullIdentity(object|array $row): string
+    {
+        if (is_array($row)) {
+            $raw = is_array($row['row_raw'] ?? null) ? $row['row_raw'] : [];
+            $sku = $row['sku'] ?? $raw['sku'] ?? null;
+            $adName = $row['ad_name'] ?? $raw['ad_name'] ?? null;
+            $variation = $row['variation'] ?? $raw['variation'] ?? null;
+        } else {
+            $raw = $this->decodeJson($row->row_raw ?? null) ?: [];
+            $sku = $raw['sku'] ?? null;
+            $adName = $row->ad_name ?? $raw['ad_name'] ?? null;
+            $variation = $row->variation ?? $raw['variation'] ?? null;
+        }
+
+        $skuKey = $this->normalizeImportedOrderNumber(trim((string) ($sku ?? '')));
+        $titleKey = $this->normalizeScanValue(trim((string) ($adName ?? '')));
+        $variantKey = $this->normalizeScanValue(trim((string) ($variation ?? '')));
+
+        $identity = implode('|', [$skuKey, $titleKey, $variantKey]);
+
+        return trim($identity, '|') === '' ? '' : 'full:' . $identity;
     }
 
     private function normalizeIncomingShippingField(string $field, mixed $value): mixed
