@@ -1466,9 +1466,8 @@ final class MercadoLivreService
             $packId = (int) ($order['pack_id'] ?? 0);
             $key = $packId > 0 ? 'p' . $packId : 'o' . $orderId;
 
-            $bucket = $targets[$key] ?? null;
-            if ($bucket === null) {
-                $bucket = [
+            if (!isset($targets[$key])) {
+                $targets[$key] = [
                     'key' => $key,
                     'order_ids' => [],
                     'pack_id' => $packId > 0 ? $packId : null,
@@ -1480,13 +1479,15 @@ final class MercadoLivreService
                     'group_id' => $groupId,
                     'order_date' => (string) ($order['date_created'] ?? ''),
                 ];
-                $targets[$key] = $bucket;
-            } elseif ($bucket['group_id'] === null) {
-                $bucket['group_id'] = $groupId;
+            } elseif ($targets[$key]['group_id'] === null && $groupId !== null) {
+                $targets[$key]['group_id'] = $groupId;
             }
 
-            $bucket['order_ids'][] = $orderId;
-            $bucket['qty'] += $qty;
+            // Importante: arrays PHP sao copiados por valor — pedidos e
+            // unidades acumulam direto no alvo guardado em $targets,
+            // senao o loop de gravacao receberia listas vazias.
+            $targets[$key]['order_ids'][] = $orderId;
+            $targets[$key]['qty'] += $qty;
         }
 
         $targetsChecked = 0;
