@@ -44,61 +44,73 @@ final class MercadoLivreConfigController
             return response()->json(['message' => 'Apenas administradores podem alterar a configuracao do Mercado Livre.'], 403);
         }
 
-        $existing = $this->loadRow();
-        $validator = Validator::make($request->all(), [
-            'client_id' => ['required', 'string', 'max:120'],
-            'redirect_uri' => ['required', 'url', 'max:255'],
-            'client_secret' => [
-                empty($existing['client_secret']) ? 'required' : 'nullable',
-                'string',
-                'max:255',
-            ],
-        ]);
+        try {
+            $existing = $this->loadRow();
+            $validator = Validator::make($request->all(), [
+                'client_id' => ['required', 'string', 'max:120'],
+                'redirect_uri' => ['required', 'url', 'max:255'],
+                'client_secret' => [
+                    empty($existing['client_secret']) ? 'required' : 'nullable',
+                    'string',
+                    'max:255',
+                ],
+            ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Dados invalidos para configuracao do Mercado Livre.',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+            if ($validator->fails()) {
+                return response()->json([
+                    'message' => 'Dados invalidos para configuracao do Mercado Livre.',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
 
-        $secretInput = trim((string) $request->input('client_secret', ''));
-        $secret = $secretInput !== '' ? $secretInput : (string) ($existing['client_secret'] ?? '');
+            $secretInput = trim((string) $request->input('client_secret', ''));
+            $secret = $secretInput !== '' ? $secretInput : (string) ($existing['client_secret'] ?? '');
 
-        if ($secret === '') {
-            return response()->json([
-                'message' => 'Informe o Client Secret do Mercado Livre.',
-                'errors' => ['client_secret' => ['Informe o Client Secret do Mercado Livre.']],
-            ], 422);
-        }
+            if ($secret === '') {
+                return response()->json([
+                    'message' => 'Informe o Client Secret do Mercado Livre.',
+                    'errors' => ['client_secret' => ['Informe o Client Secret do Mercado Livre.']],
+                ], 422);
+            }
 
-        $config = [
-            'client_id' => trim((string) $request->input('client_id')),
-            'redirect_uri' => trim((string) $request->input('redirect_uri')),
-            'client_secret' => Crypt::encryptString($secret),
-        ];
+            $config = [
+                'client_id' => trim((string) $request->input('client_id')),
+                'redirect_uri' => trim((string) $request->input('redirect_uri')),
+                'client_secret' => Crypt::encryptString($secret),
+            ];
 
-        $existingRow = DB::table('app_settings')
-            ->where('id', self::SETTING_ID)
-            ->whereNull('user_id')
-            ->first();
-
-        if ($existingRow) {
-            DB::table('app_settings')
+            $existingRow = DB::table('app_settings')
                 ->where('id', self::SETTING_ID)
                 ->whereNull('user_id')
-                ->update([
+                ->first();
+
+            if ($existingRow) {
+                DB::table('app_settings')
+                    ->where('id', self::SETTING_ID)
+                    ->whereNull('user_id')
+                    ->update([
+                        'config_data' => json_encode($config),
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                DB::table('app_settings')->insert([
+                    'id' => self::SETTING_ID,
+                    'user_id' => null,
                     'config_data' => json_encode($config),
+                    'created_at' => now(),
                     'updated_at' => now(),
                 ]);
-        } else {
-            DB::table('app_settings')->insert([
-                'id' => self::SETTING_ID,
-                'user_id' => null,
-                'config_data' => json_encode($config),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            }
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Falha ao salvar a configuracao do Mercado Livre: ' . $e->getMessage(),
+                'detail' => [
+                    'exception' => get_class($e),
+                    'file' => basename($e->getFile()) . ':' . $e->getLine(),
+                ],
+            ], 500);
         }
 
         return response()->json([
