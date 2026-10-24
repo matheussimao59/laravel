@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\MercadoLivreAccount;
 use App\Models\User;
 use App\Support\ExternalServiceException;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -721,24 +722,69 @@ final class MercadoLivreService
             return;
         }
 
+        $idList = array_map('strval', array_keys($shipmentIds));
+
+        // 1) Detalhe do envio em paralelo (status/datas para resolver data do envio).
+        $detailPaths = [];
+        foreach ($idList as $id) {
+            $detailPaths[$id] = "/shipments/{$id}";
+        }
+        $detailResponses = $this->poolGet($detailPaths, $accessToken, 10);
         $shipmentMap = [];
+        foreach ($detailResponses as $id => $detail) {
+            if (is_array($detail) && $detail !== []) {
+                $shipmentMap[(string) $id] = $detail;
+            }
+        }
+
+        // 2) Custos do envio em paralelo (1 request por envio).
+        $costPaths = [];
+        foreach ($idList as $id) {
+            $costPaths[$id] = "/shipments/{$id}/costs";
+        }
+        $costResponses = $this->poolGet($costPaths, $accessToken, 10);
         $shipmentCostMap = [];
+        $fallbackIds = [];
+        foreach ($costResponses as $id => $payload) {
+            $idStr = (string) $id;
+            if (!is_array($payload)) {
+                $shipmentCostMap[$idStr] = [
+                    'sellerCost' => 0.0,
+                    'raw' => null,
+                ];
+                $fallbackIds[$idStr] = $idStr;
+                continue;
+            }
+            $sellerCost = $this->extractShipmentSellerCost($payload);
+            $shipmentCostMap[$idStr] = [
+                'sellerCost' => $sellerCost,
+                'raw' => $payload,
+            ];
+            if ($sellerCost <= 0) {
+                $fallbackIds[$idStr] = $idStr;
+            }
+        }
 
-        foreach (array_keys($shipmentIds) as $shipmentId) {
-            $details = $this->safeRequest("/shipments/{$shipmentId}", $accessToken);
-            $costInfo = $this->fetchShipmentCosts($shipmentId, $accessToken);
-
-            if (($costInfo['sellerCost'] ?? 0) <= 0) {
-                $fallback = $this->fetchShipmentPaymentsCost($shipmentId, $accessToken);
-                if (($fallback['sellerCost'] ?? 0) > 0) {
-                    $costInfo = $fallback;
+        // 3) Fallback apenas nos envios sem custo conhecido (rota antiga de payments).
+        if ($fallbackIds !== []) {
+            $fallbackPaths = [];
+            foreach (array_keys($fallbackIds) as $id) {
+                $fallbackPaths[$id] = "/shipments/{$id}/payments";
+            }
+            $fallbackResponses = $this->poolGet($fallbackPaths, $accessToken, 10, ['x-format-new' => 'true']);
+            foreach ($fallbackResponses as $id => $payload) {
+                $idStr = (string) $id;
+                if (!is_array($payload)) {
+                    continue;
+                }
+                $sellerCost = $this->extractShipmentSellerCost($payload);
+                if ($sellerCost > 0) {
+                    $shipmentCostMap[$idStr] = [
+                        'sellerCost' => $sellerCost,
+                        'raw' => $payload,
+                    ];
                 }
             }
-
-            if ($details !== null) {
-                $shipmentMap[$shipmentId] = $details;
-            }
-            $shipmentCostMap[$shipmentId] = $costInfo;
         }
 
         foreach ($orders as &$order) {
@@ -758,32 +804,6 @@ final class MercadoLivreService
             $order['shipping_date_resolved'] = $this->resolveShippingDate($order);
         }
         unset($order);
-    }
-
-    private function fetchShipmentCosts(string $shipmentId, string $accessToken): array
-    {
-        $payload = $this->safeRequest("/shipments/{$shipmentId}/costs", $accessToken);
-
-        return [
-            'sellerCost' => $this->extractShipmentSellerCost($payload),
-            'raw' => $payload,
-        ];
-    }
-
-    private function fetchShipmentPaymentsCost(string $shipmentId, string $accessToken): array
-    {
-        $payload = $this->safeRequest(
-            "/shipments/{$shipmentId}/payments",
-            $accessToken,
-            'GET',
-            null,
-            ['x-format-new' => 'true']
-        );
-
-        return [
-            'sellerCost' => $this->extractShipmentSellerCost($payload),
-            'raw' => $payload,
-        ];
     }
 
     private function extractShipmentSellerCost(mixed $payload): float
@@ -861,7 +881,81 @@ final class MercadoLivreService
 
     private function attachPaymentsToOrders(array &$orders, string $accessToken): void
     {
-        $paymentDetailsMap = [];
+        $orderIds = [];
+        foreach ($orders as $order) {
+            $orderId = (int) ($order['id'] ?? 0);
+            if ($orderId > 0) {
+                $orderIds[(string) $orderId] = $orderId;
+            }
+        }
+
+        if ($orderIds === []) {
+            return;
+        }
+
+        // 1) Busca toda a lista de pagamentos em paralelo (1 request por pedido).
+        $paths = [];
+        foreach ($orderIds as $orderId) {
+            $paths[(string) $orderId] = "/orders/{$orderId}/payments";
+        }
+        $listResponses = $this->poolGet($paths, $accessToken, 10);
+
+        $rawPaymentsByOrder = [];
+        $missingDetailList = [];
+        foreach ($orderIds as $orderId) {
+            $key = (string) $orderId;
+            $raw = array_key_exists($key, $listResponses) ? $listResponses[$key] : null;
+            if (is_array($raw) && array_is_list($raw)) {
+                $rawPaymentsByOrder[$key] = $raw;
+                continue;
+            }
+            $rawPaymentsByOrder[$key] = [];
+            $missingDetailList[$key] = $orderId;
+        }
+
+        // 2) Fallback pontual: pedido cuja lista falhou busca no detalhe do pedido.
+        if ($missingDetailList !== []) {
+            $detailPaths = [];
+            foreach ($missingDetailList as $orderId) {
+                $detailPaths[(string) $orderId] = "/orders/{$orderId}";
+            }
+            $detailResponses = $this->poolGet($detailPaths, $accessToken, 10);
+            foreach ($detailResponses as $key => $detail) {
+                if (is_array($detail) && is_array($detail['payments'] ?? null)) {
+                    $rawPaymentsByOrder[(string) $key] = is_array($detail['payments']) ? $detail['payments'] : [];
+                }
+            }
+        }
+
+        // 3) Enriquecimento fino (/v1/payments/{id}) apenas quando a lista nao
+        //    trouxe nenhuma evidencia de tarifa (caso raro) — evita 1-2 requests
+        //    por pedido no caminho padrao.
+        $breakdownPaths = [];
+        foreach ($orders as $order) {
+            $orderId = (int) ($order['id'] ?? 0);
+            if ($orderId <= 0) {
+                continue;
+            }
+            $key = (string) $orderId;
+            $rawPayments = $rawPaymentsByOrder[$key] ?? [];
+            if ($this->paymentsHaveFeeEvidence($rawPayments)) {
+                continue;
+            }
+            $paymentIds = $this->extractPaymentIds($rawPayments);
+            foreach ($paymentIds as $paymentId) {
+                $breakdownPaths[$paymentId] = "/v1/payments/{$paymentId}";
+            }
+        }
+
+        $breakdownByPayment = [];
+        if ($breakdownPaths !== []) {
+            $breakdownResponses = $this->poolGet($breakdownPaths, $accessToken, 10);
+            foreach ($breakdownResponses as $paymentId => $detail) {
+                if (is_array($detail) && $detail !== []) {
+                    $breakdownByPayment[(string) $paymentId] = $detail;
+                }
+            }
+        }
 
         foreach ($orders as &$order) {
             $orderId = (int) ($order['id'] ?? 0);
@@ -870,21 +964,17 @@ final class MercadoLivreService
                 continue;
             }
 
-            $rawPayments = $this->fetchOrderPayments($orderId, $accessToken);
-            $paymentIds = $this->extractPaymentIds($rawPayments);
+            $key = (string) $orderId;
+            $rawPayments = $rawPaymentsByOrder[$key] ?? [];
 
-            if ($paymentIds === []) {
+            if ($this->paymentsHaveFeeEvidence($rawPayments) || $breakdownByPayment === []) {
                 $order['payments'] = $rawPayments;
                 continue;
             }
 
             $details = [];
-            foreach ($paymentIds as $paymentId) {
-                if (!array_key_exists($paymentId, $paymentDetailsMap)) {
-                    $paymentDetailsMap[$paymentId] = $this->fetchPaymentDetails($paymentId, $accessToken);
-                }
-
-                $detail = $paymentDetailsMap[$paymentId];
+            foreach ($this->extractPaymentIds($rawPayments) as $paymentId) {
+                $detail = $breakdownByPayment[$paymentId] ?? null;
                 if ($detail !== null) {
                     $details[] = $detail;
                 }
@@ -895,15 +985,28 @@ final class MercadoLivreService
         unset($order);
     }
 
-    private function fetchOrderPayments(int $orderId, string $accessToken): array
+    private function paymentsHaveFeeEvidence(array $payments): bool
     {
-        $payments = $this->safeRequest("/orders/{$orderId}/payments", $accessToken);
-        if (is_array($payments) && array_is_list($payments)) {
-            return $payments;
+        foreach ($payments as $payment) {
+            if (!is_array($payment)) {
+                continue;
+            }
+            $status = strtolower((string) ($payment['status'] ?? ''));
+            if ($status === 'cancelled') {
+                continue;
+            }
+            if ((float) ($payment['marketplace_fee'] ?? 0) > 0) {
+                return true;
+            }
+            if ((float) ($payment['fee_amount'] ?? 0) > 0) {
+                return true;
+            }
+            if ((float) ($payment['taxes_amount'] ?? 0) > 0) {
+                return true;
+            }
         }
 
-        $orderDetail = $this->safeRequest("/orders/{$orderId}", $accessToken);
-        return is_array($orderDetail['payments'] ?? null) ? $orderDetail['payments'] : [];
+        return false;
     }
 
     private function extractPaymentIds(array $rawPayments): array
@@ -926,17 +1029,6 @@ final class MercadoLivreService
         return $ids;
     }
 
-    private function fetchPaymentDetails(string $paymentId, string $accessToken): ?array
-    {
-        $detail = $this->safeRequest("/v1/payments/{$paymentId}", $accessToken);
-        if (is_array($detail)) {
-            return $detail;
-        }
-
-        $fallback = $this->safeRequest("/payments/{$paymentId}", $accessToken);
-        return is_array($fallback) ? $fallback : null;
-    }
-
     private function safeRequest(
         string $path,
         string $accessToken,
@@ -949,6 +1041,59 @@ final class MercadoLivreService
         } catch (ExternalServiceException) {
             return null;
         }
+    }
+
+    /**
+     * Executa varias requisicoes GET em paralelo (Http::pool), respeitando um
+     * limite de concorrencia para nao trocar rate limit do Mercado Livre.
+     * Chaves numericas/string dos Paths chaveam o resultado decodificado
+     * (null quando a request falha — chamada "safe").
+     *
+     * @param array<string, string> $pathsByKey
+     */
+    private function poolGet(array $pathsByKey, string $accessToken, int $concurrency = 10, array $headers = []): array
+    {
+        if ($pathsByKey === []) {
+            return [];
+        }
+
+        $keys = array_map('strval', array_keys($pathsByKey));
+        $decoded = [];
+
+        for ($i = 0; $i < count($keys); $i += max(1, $concurrency)) {
+            $chunk = array_slice($keys, $i, max(1, $concurrency));
+            if ($i > 0) {
+                // Pausa curta entre lotes para respeitar o rate limit do ML.
+                usleep(120000);
+            }
+            $responses = Http::pool(function (Pool $pool) use ($chunk, $pathsByKey, $accessToken, $headers) {
+                foreach ($chunk as $key) {
+                    $entry = $pool->as($key)
+                        ->acceptJson()
+                        ->timeout(45)
+                        ->withToken($accessToken);
+                    if ($headers !== []) {
+                        $entry = $entry->withHeaders($headers);
+                    }
+                    $entry->get($this->baseUrl() . $pathsByKey[$key]);
+                }
+            });
+
+            foreach ($responses as $key => $response) {
+                $json = null;
+                try {
+                    if ($response instanceof Response && $response->successful()) {
+                        $parsed = $response->json();
+                        $json = $parsed ?? [];
+                    }
+                } catch (\Throwable) {
+                    $json = null;
+                }
+                $decoded[$key] = $json;
+            }
+        }
+
+        return $decoded;
     }
 
     private function resolveShippingDate(array $order): string
