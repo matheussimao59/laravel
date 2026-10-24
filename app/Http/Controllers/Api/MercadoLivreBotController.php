@@ -295,6 +295,14 @@ final class MercadoLivreBotController
         }
 
         $first = $rows->first();
+        if ($first->status === MlBotOrder::STATUS_SENT) {
+            return response()->json([
+                'message' => 'Mensagem ja enviada para esta compra.',
+                'orders' => $this->service->botOrdersForUser($user),
+                'counts' => $this->service->botOrderCounts($user),
+            ]);
+        }
+
         $group = $rows->pluck('group_id')->filter()->first() !== null
             ? MlBotGroup::find($rows->pluck('group_id')->filter()->first())
             : null;
@@ -329,10 +337,10 @@ final class MercadoLivreBotController
 
             if (!($response['ok'] ?? false)) {
                 return response()->json([
-                    'error' => 'ml_message_send_failed',
-                    'message' => 'Nao foi possivel enviar a mensagem pelo chat do Mercado Livre.',
+                    'error' => $response['error'] ?? 'ml_message_send_failed',
+                    'message' => $response['message'] ?? 'Nao foi possivel enviar a mensagem pelo chat do Mercado Livre.',
                     'details' => $response['details'] ?? $response['message'] ?? null,
-                ], 502);
+                ], $response['status'] ?? 502);
             }
         } catch (ExternalServiceException $exception) {
             return response()->json([

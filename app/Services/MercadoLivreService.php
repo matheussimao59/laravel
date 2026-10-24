@@ -9,6 +9,7 @@ use App\Models\MlBotOrder;
 use App\Models\MlBotSetting;
 use App\Models\User;
 use App\Support\ExternalServiceException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
@@ -97,83 +98,112 @@ final class MercadoLivreService
         ?int $packId,
         string $message,
     ): array {
-        $optionId = 'REQUEST_VARIANTS';
+        if (mb_strlen($message) > 350) {
+            return [
+                'ok' => false,
+                'status' => 422,
+                'error' => 'ml_message_too_long',
+                'message' => 'O Mercado Livre aceita ate 350 caracteres. Reduza a mensagem do grupo antes de enviar.',
+            ];
+        }
 
-        if (($packId ?? 0) > 0) {
-            try {
-                $this->request("/messages/action_guide/packs/{$packId}/caps_available?tag=post_sale", $accessToken);
-            } catch (ExternalServiceException) {
-                // Nao bloqueia o fluxo.
-            }
+        // Sem pack_id, a API de mensageria usa o order_id na mesma rota /packs.
+        $targetId = ($packId ?? 0) > 0 ? $packId : $orderId;
+        $path = "/messages/packs/{$targetId}/sellers/{$sellerId}?tag=post_sale";
 
-            try {
-                $optionsPayload = $this->request(
-                    "/messages/action_guide/packs/{$packId}/options?tag=post_sale",
-                    $accessToken
-                );
-                $found = $this->findRequestVariantsOption($optionsPayload);
-                if ($found !== null) {
-                    $optionId = $found;
+        try {
+            $conversation = $this->readOrderConversation($accessToken, $sellerId, $packId, $orderId);
+            $directMessage = ($conversation['buyer_messages'] ?? 0) > 0;
+
+            if (!$directMessage) {
+                $path = "/messages/action_guide/packs/{$targetId}?tag=post_sale";
+                try {
+                    $this->request($path, $accessToken);
+                } catch (ExternalServiceException $exception) {
+                    $details = $exception->details();
+                    if (!is_array($details) || ($details['cause'] ?? null) !== 'blocked_by_excepted_case') {
+                        throw $exception;
+                    }
+                    // Produtos com tempo de fabricacao usam a mensageria direta,
+                    // conforme a excecao informada pelo proprio Mercado Livre.
+                    $directMessage = true;
                 }
-            } catch (ExternalServiceException) {
-                // Mantem fallback REQUEST_VARIANTS.
             }
-        }
 
-        $attempts = [];
-        if (($packId ?? 0) > 0) {
-            $attempts[] = [
-                'path' => "/messages/action_guide/packs/{$packId}/sellers/{$sellerId}?tag=post_sale",
-                'body' => ['text' => $message, 'option_id' => $optionId],
-            ];
-            $attempts[] = [
-                'path' => "/messages/action_guide/packs/{$packId}/option/{$optionId}/sellers/{$sellerId}?tag=post_sale",
-                'body' => ['text' => $message],
-            ];
-            $attempts[] = [
-                'path' => "/messages/action_guide/packs/{$packId}/options/{$optionId}/sellers/{$sellerId}?tag=post_sale",
-                'body' => ['text' => $message],
-            ];
-        }
+            if ($directMessage) {
+                // Nas conversas migradas, quem responde e o agente do ML.
+                // Reutiliza o remetente real do chat, nao um ID fixo de comprador.
+                $recipientId = (int) ($conversation['recipient_id'] ?? 0);
+                if ($recipientId <= 0) {
+                    $path = "/orders/{$orderId}";
+                    $order = $this->request($path, $accessToken);
+                    $recipientId = (int) ($order['buyer']['id'] ?? 0);
+                }
+                if ($recipientId <= 0) {
+                    throw new ExternalServiceException('Nao foi possivel identificar o destinatario da mensagem.', 422);
+                }
 
-        $attempts[] = [
-            'path' => "/messages/action_guide/orders/{$orderId}/sellers/{$sellerId}?tag=post_sale",
-            'body' => ['text' => $message, 'option_id' => $optionId],
-        ];
-        $attempts[] = [
-            'path' => "/messages/action_guide/orders/{$orderId}/option/{$optionId}/sellers/{$sellerId}?tag=post_sale",
-            'body' => ['text' => $message],
-        ];
-        $attempts[] = [
-            'path' => "/messages/action_guide/orders/{$orderId}/options/{$optionId}/sellers/{$sellerId}?tag=post_sale",
-            'body' => ['text' => $message],
-        ];
-
-        $lastDetails = null;
-
-        foreach ($attempts as $attempt) {
-            try {
-                $response = $this->request($attempt['path'], $accessToken, 'POST', $attempt['body']);
-
-                return [
-                    'ok' => true,
-                    'order_id' => $orderId,
-                    'pack_id' => $packId,
-                    'option_id' => $optionId,
-                    'path_used' => $attempt['path'],
-                    'response' => $response,
+                $path = "/messages/packs/{$targetId}/sellers/{$sellerId}?tag=post_sale";
+                $body = [
+                    'from' => ['user_id' => $sellerId],
+                    'to' => ['user_id' => $recipientId],
+                    'text' => $message,
                 ];
-            } catch (ExternalServiceException $exception) {
-                $lastDetails = $exception->details() ?: $exception->getMessage();
+            } else {
+                // REQUEST_VARIANTS exige um template fixo do ML. O texto
+                // personalizado do grupo deve usar a opcao OTHER.
+                $path = "/messages/action_guide/packs/{$targetId}/option?tag=post_sale";
+                $body = ['option_id' => 'OTHER', 'text' => $message];
             }
-        }
 
-        return [
-            'ok' => false,
-            'error' => 'ml_message_send_failed',
-            'message' => 'Nao foi possivel enviar mensagem de personalizacao.',
-            'details' => $lastDetails,
-        ];
+            // Uma unica rota de escrita: nunca tenta outro POST apos uma
+            // resposta ambigua, para evitar mensagens duplicadas.
+            $response = $this->request($path, $accessToken, 'POST', $body);
+            $sentMessage = $response['messages'][0] ?? $response;
+            if (
+                in_array($sentMessage['status'] ?? null, ['moderated', 'rejected'], true)
+                || in_array($sentMessage['message_moderation']['status'] ?? null, ['rejected', 'moderated'], true)
+            ) {
+                return [
+                    'ok' => false,
+                    'status' => 422,
+                    'error' => 'ml_message_moderated',
+                    'message' => 'O Mercado Livre bloqueou a mensagem na moderacao. Revise o texto do grupo antes de tentar novamente.',
+                    'details' => $response,
+                ];
+            }
+
+            return [
+                'ok' => true,
+                'order_id' => $orderId,
+                'pack_id' => $packId,
+                'option_id' => $directMessage ? null : 'OTHER',
+                'path_used' => $path,
+                'response' => $response,
+            ];
+        } catch (ExternalServiceException $exception) {
+            $details = $exception->details();
+            $metadata = json_decode($exception->getMessage(), true);
+            $upstreamStatus = (int) ($metadata['status'] ?? $exception->status());
+            $reason = is_array($details) && is_string($details['message'] ?? null)
+                ? $details['message']
+                : (is_array($metadata) ? 'Envio nao autorizado.' : $exception->getMessage());
+
+            return [
+                'ok' => false,
+                'status' => $upstreamStatus >= 500 ? 502 : (in_array($upstreamStatus, [409, 429], true) ? $upstreamStatus : 422),
+                'error' => 'ml_message_send_failed',
+                'message' => "O Mercado Livre recusou o envio (HTTP {$upstreamStatus}): {$reason}",
+                'details' => ['path' => $path, 'upstream_status' => $upstreamStatus, 'response' => $details],
+            ];
+        } catch (ConnectionException) {
+            return [
+                'ok' => false,
+                'status' => 502,
+                'error' => 'ml_message_connection_failed',
+                'message' => 'A conexao com o Mercado Livre falhou. Confira o chat da compra antes de tentar novamente, pois o envio pode ter sido recebido.',
+            ];
+        }
     }
 
     public function syncOrders(
@@ -660,30 +690,6 @@ final class MercadoLivreService
             'date_created' => trim((string) ($item['date_created'] ?? '')),
             'last_updated' => trim((string) ($item['last_updated'] ?? '')),
         ];
-    }
-
-    private function findRequestVariantsOption(mixed $optionsPayload): ?string
-    {
-        $options = [];
-        if (is_array($optionsPayload)) {
-            $options = $optionsPayload;
-        } elseif (is_array($optionsPayload['options'] ?? null)) {
-            $options = $optionsPayload['options'];
-        }
-
-        foreach ($options as $option) {
-            if (!is_array($option)) {
-                continue;
-            }
-
-            $id = trim((string) ($option['id'] ?? ''));
-            $code = strtoupper(trim((string) ($option['code'] ?? $option['name'] ?? $option['tag'] ?? '')));
-            if ($id !== '' && str_contains($code, 'REQUEST_VARIANTS')) {
-                return $id;
-            }
-        }
-
-        return null;
     }
 
     private function sellerFromAccount(?MercadoLivreAccount $account): ?array
@@ -1316,60 +1322,61 @@ final class MercadoLivreService
         ?int $packId,
         int $orderId,
     ): array {
-        $paths = [];
-        if (($packId ?? 0) > 0) {
-            $paths[] = "/messages/packs/{$packId}/sellers/{$sellerId}?offset=0&limit=30";
-        }
-        // Pedido sem carrinho responde na rota de packs usando o id do pedido.
-        $paths[] = "/messages/packs/{$orderId}/sellers/{$sellerId}?offset=0&limit=30";
-
+        $targetId = ($packId ?? 0) > 0 ? $packId : $orderId;
+        $path = "/messages/packs/{$targetId}/sellers/{$sellerId}?offset=0&limit=30&tag=post_sale&mark_as_read=false";
         $headers = ['x-format-new' => 'true'];
 
-        foreach ($paths as $path) {
-            try {
-                $payload = $this->request($path, $accessToken, 'GET', null, $headers);
-                $conversation = is_array($payload['conversation'] ?? null) ? $payload['conversation'] : [];
+        try {
+            $payload = $this->request($path, $accessToken, 'GET', null, $headers);
+            $conversation = is_array($payload['messages'] ?? null)
+                ? $payload['messages']
+                : (is_array($payload['conversation'] ?? null) ? $payload['conversation'] : []);
 
-                $buyerMessages = 0;
-                $sellerMessages = 0;
-                $lastBuyerText = null;
-                $lastBuyerDate = null;
+            $buyerMessages = 0;
+            $sellerMessages = 0;
+            $lastBuyerText = null;
+            $lastBuyerDate = null;
+            $recipientId = null;
 
-                foreach ($conversation as $message) {
-                    if (!is_array($message)) {
-                        continue;
-                    }
-                    $fromUserId = (int) (($message['from']['user_id'] ?? 0));
-                    if ($fromUserId === 0) {
-                        continue;
-                    }
+            foreach ($conversation as $message) {
+                if (!is_array($message)) {
+                    continue;
+                }
+                $fromUserId = (int) ($message['from']['user_id'] ?? 0);
+                if ($fromUserId === 0) {
+                    continue;
+                }
 
-                    if ($fromUserId === $sellerId) {
-                        $sellerMessages++;
-                        continue;
+                if ($fromUserId === $sellerId) {
+                    $sellerMessages++;
+                    if ($recipientId === null && (int) ($message['to']['user_id'] ?? 0) > 0) {
+                        $recipientId = (int) $message['to']['user_id'];
                     }
+                    continue;
+                }
 
-                    $buyerMessages++;
-                    $date = trim((string) ($message['date'] ?? ''));
-                    $text = trim((string) ($message['message'] ?? ''));
-                    if ($text === '') {
-                        continue;
-                    }
-                    if ($lastBuyerDate === null || $date === '' || $date > $lastBuyerDate) {
-                        $lastBuyerDate = $date !== '' ? $date : $lastBuyerDate;
+                $buyerMessages++;
+                $date = trim((string) ($message['message_date']['created'] ?? $message['date'] ?? ''));
+                $content = $message['text'] ?? $message['message'] ?? '';
+                $text = trim((string) (is_array($content) ? ($content['plain'] ?? '') : $content));
+                if ($lastBuyerDate === null || $date === '' || $date > $lastBuyerDate) {
+                    $recipientId = $fromUserId;
+                    $lastBuyerDate = $date !== '' ? $date : $lastBuyerDate;
+                    if ($text !== '') {
                         $lastBuyerText = $text;
                     }
                 }
-
-                return [
-                    'ok' => true,
-                    'buyer_messages' => $buyerMessages,
-                    'seller_messages' => $sellerMessages,
-                    'last_buyer_text' => $lastBuyerText,
-                ];
-            } catch (ExternalServiceException $exception) {
-                // tenta o proximo path pedido sem carrinho
             }
+
+            return [
+                'ok' => true,
+                'buyer_messages' => $buyerMessages,
+                'seller_messages' => $sellerMessages,
+                'last_buyer_text' => $lastBuyerText,
+                'recipient_id' => $recipientId,
+            ];
+        } catch (ExternalServiceException) {
+            // Sem acesso ao chat, a API de motivos decidira se pode iniciar a conversa.
         }
 
         return [

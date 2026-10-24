@@ -100,8 +100,8 @@ class MercadoLivreBotTest extends TestCase
             ->assertJsonPath('counts.pending', 61)
             ->assertJsonCount(61, 'orders');
 
-        // Cada tentativa falha consulta o carrinho e depois o pedido.
-        Http::assertSentCount(122);
+        // Nao consulta outro pedido quando o pack ja e conhecido.
+        Http::assertSentCount(62);
         $this->assertSame(61, MlBotOrder::where('user_id', $user->id)->count());
         $this->assertSame(0, MlBotOrder::where('user_id', $user->id)->whereNotNull('conversation_checked_at')->count());
     }
