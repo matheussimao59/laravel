@@ -104,8 +104,13 @@ final class MercadoLivreConfigController
         } catch (\Throwable $e) {
             report($e);
 
+            $message = $e->getMessage();
+            if (str_contains($message, 'application encryption key')) {
+                $message = 'O servidor nao tem a chave de criptografia (APP_KEY). Rode "php artisan key:generate" e "php artisan config:clear" no projeto no servidor e tente salvar de novo.';
+            }
+
             return response()->json([
-                'message' => 'Falha ao salvar a configuracao do Mercado Livre: ' . $e->getMessage(),
+                'message' => 'Falha ao salvar a configuracao do Mercado Livre: ' . $message,
                 'detail' => [
                     'exception' => get_class($e),
                     'file' => basename($e->getFile()) . ':' . $e->getLine(),
