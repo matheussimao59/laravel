@@ -447,10 +447,8 @@ final class MercadoLivreService
             'client_secret' => trim((string) config('services.mercado_livre.client_secret')),
         ];
 
-        if ($envCredentials['client_id'] !== '' && $envCredentials['client_secret'] !== '') {
-            return $envCredentials;
-        }
-
+        // SaaS: credenciais do painel do admin (global_ml_oauth_config) tem
+        // PRIORIDADE; o .env funciona como fallback enquanto o painel estiver vazio.
         $stored = DB::table('app_settings')
             ->where('id', 'global_ml_oauth_config')
             ->whereNull('user_id')
@@ -478,6 +476,10 @@ final class MercadoLivreService
                     ];
                 }
             }
+        }
+
+        if ($envCredentials['client_id'] !== '' && $envCredentials['client_secret'] !== '') {
+            return $envCredentials;
         }
 
         return $envCredentials;

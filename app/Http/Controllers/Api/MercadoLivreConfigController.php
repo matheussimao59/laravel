@@ -149,6 +149,14 @@ final class MercadoLivreConfigController
 
     private function publicConfig(): array
     {
+        // SaaS: credenciais do painel do admin tem PRIORIDADE; o .env executa
+        // como fallback enquanto o painel estiver vazio.
+        $stored = $this->loadRow();
+        if (trim((string) ($stored['client_id'] ?? '')) !== ''
+            && trim((string) ($stored['client_secret'] ?? '')) !== '') {
+            return $stored;
+        }
+
         $envClientId = trim((string) config('services.mercado_livre.client_id', ''));
         $envClientSecret = trim((string) config('services.mercado_livre.client_secret', ''));
         if ($envClientId !== '' || $envClientSecret !== '') {
@@ -161,7 +169,7 @@ final class MercadoLivreConfigController
             ];
         }
 
-        return $this->loadRow();
+        return $stored;
     }
 
     private function defaultRedirectUri(): string
