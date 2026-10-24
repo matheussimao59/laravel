@@ -1390,6 +1390,14 @@ final class MercadoLivreService
      */
     public function scanBotOrders(User $user, ?string $startDate = null, int $maxPages = 10): array
     {
+        // Varredura demorada (dezenas de chamadas ao ML): amplia o tempo
+        // de execucao quando o PHP-FPM permite; se negado, o orçamento
+        // de tempo da fase de conversas mantem o request dentro do teto.
+        @set_time_limit(300);
+
+        $startedAt = microtime(true);
+        $conversationBudgetMs = 20000;
+
         $accessToken = $this->accessTokenForUser($user);
         $account = $user->mercadoLivreAccount()->first();
         $knownSeller = $this->sellerFromAccount($account);
@@ -1411,6 +1419,8 @@ final class MercadoLivreService
             false,
             $knownSeller
         );
+
+        $sellerId = (int) $payload['seller']['id'];
 
         // Vinculo anuncio -> grupo salvo no banco (a escolha do usuario).
         $groupIdByItem = [];
@@ -1545,8 +1555,7 @@ final class MercadoLivreService
                     || $firstRow->conversation_checked_at->copy()->addMinutes(30)->isPast()
                 );
 
-            if ($needsCheck && $targetsChecked < 60) {
-                $targetsChecked++;
+            if ($needsCheck) {
                 $conversationChecks[] = [
                     'bucket' => $bucket,
                     'rows' => $existing,
@@ -1559,6 +1568,13 @@ final class MercadoLivreService
         }
 
         foreach ($conversationChecks as $check) {
+            // Conta tentativas, inclusive falhas, sem impedir a catalogacao
+            // dos pedidos que ficaram para uma proxima varredura.
+            if ($targetsChecked >= 60 || (microtime(true) - $startedAt) * 1000 >= $conversationBudgetMs) {
+                break;
+            }
+
+            $targetsChecked++;
             $conversation = $this->readOrderConversation(
                 $accessToken,
                 (int) $check['seller_id'],
