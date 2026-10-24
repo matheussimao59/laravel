@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\ManualPrintOrderController;
 use App\Http\Controllers\Api\LocalPrintJobController;
 use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\MercadoLivreConfigController;
+use App\Http\Controllers\Api\MercadoLivreBotController;
 use App\Http\Controllers\Api\ModeloController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
@@ -191,6 +192,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/products/sync', [MercadoLivreController::class, 'syncProducts']);
         Route::patch('/products/{itemId}', [MercadoLivreController::class, 'updateProduct']);
         Route::post('/customization', [MercadoLivreController::class, 'sendCustomization']);
+
+        // Bot Mila — pos-venda
+        Route::prefix('bot')->group(function () {
+            Route::get('/config', [MercadoLivreBotController::class, 'config']);
+            Route::put('/config', [MercadoLivreBotController::class, 'saveConfig']);
+            Route::get('/orders', [MercadoLivreBotController::class, 'orders']);
+            Route::post('/scan', [MercadoLivreBotController::class, 'scan']);
+            Route::post('/confirm', [MercadoLivreBotController::class, 'confirm']);
+            Route::post('/skip', [MercadoLivreBotController::class, 'skip']);
+            Route::post('/groups', [MercadoLivreBotController::class, 'storeGroup']);
+            Route::put('/groups/{groupId}', [MercadoLivreBotController::class, 'updateGroup']);
+            Route::delete('/groups/{groupId}', [MercadoLivreBotController::class, 'destroyGroup']);
+            Route::put('/groups/{groupId}/items', [MercadoLivreBotController::class, 'saveItems']);
+        });
     });
 
     Route::prefix('integrations/fiscal')->group(function () {

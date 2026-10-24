@@ -3,10 +3,15 @@
 namespace App\Services;
 
 use App\Models\MercadoLivreAccount;
+use App\Models\MlBotGroup;
+use App\Models\MlBotItem;
+use App\Models\MlBotOrder;
+use App\Models\MlBotSetting;
 use App\Models\User;
 use App\Support\ExternalServiceException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -1187,5 +1192,505 @@ final class MercadoLivreService
         }
 
         return round($suggestedPrice, 2);
+    }
+
+    /* ============================================================
+     * Bot Mila — pos-venda: grupos, varredura de vendas e conversas
+     * ============================================================ */
+
+    public function botConfigForUser(User $user): array
+    {
+        $settings = MlBotSetting::firstOrNew(['user_id' => $user->id]);
+        $groups = MlBotGroup::with('items')
+            ->where('user_id', $user->id)
+            ->orderBy('name')
+            ->get();
+
+        return [
+            'start_date' => $settings->exists
+                ? (string) $settings->start_date->format('Y-m-d')
+                : '2026-10-23',
+            'groups' => $groups
+                ->map(fn (MlBotGroup $group) => $this->mapBotGroup($group))
+                ->all(),
+        ];
+    }
+
+    public function saveBotConfig(User $user, string $startDate): array
+    {
+        $settings = MlBotSetting::updateOrCreate(
+            ['user_id' => $user->id],
+            ['start_date' => $startDate]
+        );
+
+        return [
+            'start_date' => $settings->start_date->format('Y-m-d'),
+        ];
+    }
+
+    public function storeBotGroup(User $user, string $name, ?string $template): MlBotGroup
+    {
+        return MlBotGroup::create([
+            'user_id' => $user->id,
+            'name' => $name,
+            'template' => $template,
+        ]);
+    }
+
+    public function updateBotGroup(User $user, int $groupId, string $name, ?string $template): ?MlBotGroup
+    {
+        $group = MlBotGroup::where('user_id', $user->id)->where('id', $groupId)->first();
+        if (!$group) {
+            return null;
+        }
+
+        $group->fill([
+            'name' => $name,
+            'template' => $template,
+        ]);
+        $group->save();
+
+        return $group->fresh(['items']);
+    }
+
+    public function destroyBotGroup(User $user, int $groupId): bool
+    {
+        $group = MlBotGroup::where('user_id', $user->id)->where('id', $groupId)->first();
+        if (!$group) {
+            return false;
+        }
+
+        // Itens do grupo sao removidos em cascata (FK);
+        // pedidos antigos passam a apontar para group_id null.
+        $group->delete();
+
+        return true;
+    }
+
+    public function replaceBotGroupItems(User $user, int $groupId, array $items): ?MlBotGroup
+    {
+        $group = MlBotGroup::where('user_id', $user->id)->where('id', $groupId)->first();
+        if (!$group) {
+            return null;
+        }
+
+        DB::transaction(function () use ($user, $group, $items) {
+            MlBotItem::where('user_id', $user->id)->where('group_id', $group->id)->delete();
+
+            foreach ($items as $item) {
+                $itemId = trim((string) ($item['item_id'] ?? ''));
+                if ($itemId === '') {
+                    continue;
+                }
+
+                // Um anuncio pertence a um grupo por vez: updateOrCreate
+                // move o anuncio de outro grupo quando ja estava marcado.
+                MlBotItem::updateOrCreate(
+                    ['user_id' => $user->id, 'item_id' => $itemId],
+                    [
+                        'group_id' => $group->id,
+                        'title' => self::inferredString($item['title'] ?? null),
+                        'thumbnail' => self::inferredString($item['thumbnail'] ?? null),
+                        'seller_sku' => self::inferredString($item['seller_sku'] ?? null, 120),
+                        'price' => isset($item['price']) && is_numeric($item['price'])
+                            ? (float) $item['price']
+                            : null,
+                        'item_status' => self::inferredString($item['status'] ?? null, 30),
+                    ]
+                );
+            }
+        });
+
+        return $group->fresh(['items']);
+    }
+
+    /**
+     * Le a conversa de pos-venda de um pedido/carrinho.
+     * Conta mensagens de comprador e de vendedor para dirimir:
+     * se o cliente ja escreveu no chat (aba propria) ou se o vendedor
+     * ja respondeu (evita mensagem duplicada).
+     */
+    public function readOrderConversation(
+        string $accessToken,
+        int $sellerId,
+        ?int $packId,
+        int $orderId,
+    ): array {
+        $paths = [];
+        if (($packId ?? 0) > 0) {
+            $paths[] = "/messages/packs/{$packId}/sellers/{$sellerId}?offset=0&limit=30";
+        }
+        // Pedido sem carrinho responde na rota de packs usando o id do pedido.
+        $paths[] = "/messages/packs/{$orderId}/sellers/{$sellerId}?offset=0&limit=30";
+
+        $headers = ['x-format-new' => 'true'];
+
+        foreach ($paths as $path) {
+            try {
+                $payload = $this->request($path, $accessToken, 'GET', null, $headers);
+                $conversation = is_array($payload['conversation'] ?? null) ? $payload['conversation'] : [];
+
+                $buyerMessages = 0;
+                $sellerMessages = 0;
+                $lastBuyerText = null;
+                $lastBuyerDate = null;
+
+                foreach ($conversation as $message) {
+                    if (!is_array($message)) {
+                        continue;
+                    }
+                    $fromUserId = (int) (($message['from']['user_id'] ?? 0));
+                    if ($fromUserId === 0) {
+                        continue;
+                    }
+
+                    if ($fromUserId === $sellerId) {
+                        $sellerMessages++;
+                        continue;
+                    }
+
+                    $buyerMessages++;
+                    $date = trim((string) ($message['date'] ?? ''));
+                    $text = trim((string) ($message['message'] ?? ''));
+                    if ($text === '') {
+                        continue;
+                    }
+                    if ($lastBuyerDate === null || $date === '' || $date > $lastBuyerDate) {
+                        $lastBuyerDate = $date !== '' ? $date : $lastBuyerDate;
+                        $lastBuyerText = $text;
+                    }
+                }
+
+                return [
+                    'ok' => true,
+                    'buyer_messages' => $buyerMessages,
+                    'seller_messages' => $sellerMessages,
+                    'last_buyer_text' => $lastBuyerText,
+                ];
+            } catch (ExternalServiceException $exception) {
+                // tenta o proximo path pedido sem carrinho
+            }
+        }
+
+        return [
+            'ok' => false,
+            'buyer_messages' => 0,
+            'seller_messages' => 0,
+            'last_buyer_text' => null,
+            'error' => 'ml_conversation_unavailable',
+        ];
+    }
+
+    /**
+     * Varredura que gera os comandos do bot:
+     * - traz pedidos a partir da data salva (padrao 23/10/2026);
+     * - casa os itens com anuncios marcados em grupos;
+     * - grava/atualiza um comando por pedido no banco;
+     * - checa o chat: cliente ja respondeu? vendedor ja respondeu?
+     */
+    public function scanBotOrders(User $user, ?string $startDate = null, int $maxPages = 10): array
+    {
+        $accessToken = $this->accessTokenForUser($user);
+        $account = $user->mercadoLivreAccount()->first();
+        $knownSeller = $this->sellerFromAccount($account);
+        if (is_array($knownSeller) && (int) ($knownSeller['id'] ?? 0) <= 0) {
+            $knownSeller = null;
+        }
+
+        $settings = MlBotSetting::where('user_id', $user->id)->first();
+        $startDate = trim((string) ($startDate ?? '')) ?: ($settings?->start_date?->format('Y-m-d') ?? '2026-10-23');
+        $fromDate = Carbon::parse($startDate)->startOfDay()->toIso8601String();
+
+        $payload = $this->syncOrders(
+            $accessToken,
+            $fromDate,
+            null,
+            false,
+            false,
+            max(1, $maxPages),
+            false,
+            $knownSeller
+        );
+
+        // Vinculo anuncio -> grupo salvo no banco (a escolha do usuario).
+        $groupIdByItem = [];
+        foreach (MlBotItem::where('user_id', $user->id)->get() as $item) {
+            $groupIdByItem[$item->item_id] = (int) $item->group_id;
+        }
+        $groupsById = MlBotGroup::where('user_id', $user->id)->get()->keyBy('id');
+
+        // Agrupa pedidos por carrinho (quando existir): um comando por compra.
+        $targets = [];
+        foreach ($payload['orders'] as $order) {
+            if (!is_array($order)) {
+                continue;
+            }
+            $status = strtolower(trim((string) ($order['status'] ?? '')));
+            if ($status === '' || str_contains($status, 'cancel') || str_contains($status, 'invalid')) {
+                continue;
+            }
+            $rows = is_array($order['order_items'] ?? null) ? $order['order_items'] : [];
+            if ($rows === []) {
+                continue;
+            }
+
+            $orderId = (int) ($order['id'] ?? 0);
+            if ($orderId <= 0) {
+                continue;
+            }
+
+            $firstItem = $rows[0]['item'] ?? null;
+            $itemIds = [];
+            $qty = 0;
+            $groupId = null;
+            foreach ($rows as $row) {
+                $itemId = trim((string) ($row['item']['id'] ?? ''));
+                if ($itemId !== '') {
+                    $itemIds[$itemId] = true;
+                }
+                $rowQty = (float) ($row['quantity'] ?? 1);
+                $qty += $rowQty > 0 ? $rowQty : 1;
+                if ($groupId === null && $itemId !== '' && isset($groupIdByItem[$itemId])) {
+                    $candidate = (int) $groupIdByItem[$itemId];
+                    if (isset($groupsById[$candidate])) {
+                        $groupId = $candidate;
+                    }
+                }
+            }
+
+            // So interessa venda de anuncio marcado em algum grupo.
+            if ($groupId === null) {
+                continue;
+            }
+
+            $packId = (int) ($order['pack_id'] ?? 0);
+            $key = $packId > 0 ? 'p' . $packId : 'o' . $orderId;
+
+            $bucket = $targets[$key] ?? null;
+            if ($bucket === null) {
+                $bucket = [
+                    'key' => $key,
+                    'order_ids' => [],
+                    'pack_id' => $packId > 0 ? $packId : null,
+                    'buyer_id' => (int) ($order['buyer']['id'] ?? ($order['payer']['id'] ?? 0)),
+                    'title' => (string) ($firstItem['title'] ?? 'Produto Mercado Livre'),
+                    'thumbnail' => (string) ($firstItem['thumbnail'] ?? ''),
+                    'sku' => (string) ($firstItem['seller_sku'] ?? ''),
+                    'qty' => 0,
+                    'group_id' => $groupId,
+                    'order_date' => (string) ($order['date_created'] ?? ''),
+                ];
+                $targets[$key] = $bucket;
+            } elseif ($bucket['group_id'] === null) {
+                $bucket['group_id'] = $groupId;
+            }
+
+            $bucket['order_ids'][] = $orderId;
+            $bucket['qty'] += $qty;
+        }
+
+        $targetsChecked = 0;
+        $conversationChecks = [];
+
+        foreach ($targets as $bucket) {
+            $orderDate = trim((string) $bucket['order_date']) !== ''
+                ? Carbon::parse($bucket['order_date'])
+                : now();
+
+            $existing = MlBotOrder::where('user_id', $user->id)
+                ->whereIn('order_id', $bucket['order_ids'])
+                ->get()
+                ->keyBy('order_id');
+
+            $firstRow = null;
+            foreach ($bucket['order_ids'] as $orderId) {
+                $row = $existing->get($orderId) ?? new MlBotOrder([
+                    'user_id' => $user->id,
+                    'order_id' => $orderId,
+                    'status' => MlBotOrder::STATUS_PENDING,
+                    'buyer_replied' => false,
+                    'seller_messaged' => false,
+                    'buyer_messages' => 0,
+                    'seller_messages' => 0,
+                ]);
+
+                $row->pack_id = $bucket['pack_id'];
+                $row->buyer_id = $bucket['buyer_id'] ?: $row->buyer_id;
+                $row->group_id = $bucket['group_id'];
+                $row->title = $bucket['title'];
+                $row->thumbnail = trim((string) $bucket['thumbnail']) !== '' ? (string) $bucket['thumbnail'] : $row->thumbnail;
+                $row->sku = $bucket['sku'];
+                $row->qty = $bucket['qty'];
+                $row->order_date = $orderDate;
+                $row->save();
+
+                if ($firstRow === null) {
+                    $firstRow = $row;
+                }
+            }
+
+            // Checagem de conversa por carrinho (uma chamada por compra).
+            $needsCheck = $firstRow !== null
+                && $firstRow->status !== MlBotOrder::STATUS_SKIPPED
+                && (
+                    $firstRow->buyer_replied === false
+                    || (
+                        $firstRow->status === MlBotOrder::STATUS_PENDING
+                        && !$firstRow->seller_messaged
+                    )
+                )
+                && (
+                    $firstRow->conversation_checked_at === null
+                    || $firstRow->conversation_checked_at->copy()->addMinutes(30)->isPast()
+                );
+
+            if ($needsCheck && $targetsChecked < 60) {
+                $targetsChecked++;
+                $conversationChecks[] = [
+                    'bucket' => $bucket,
+                    'rows' => $existing,
+                    'order_ids' => $bucket['order_ids'],
+                    'pack_id' => $bucket['pack_id'],
+                    'first_order_id' => $bucket['order_ids'][0],
+                    'seller_id' => $sellerId,
+                ];
+            }
+        }
+
+        foreach ($conversationChecks as $check) {
+            $conversation = $this->readOrderConversation(
+                $accessToken,
+                (int) $check['seller_id'],
+                $check['pack_id'],
+                (int) $check['first_order_id']
+            );
+            if (!($conversation['ok'] ?? false)) {
+                continue;
+            }
+
+            usleep(120000); // respeita limites de chamadas do chat
+
+            $buyerMessages = (int) $conversation['buyer_messages'];
+            $sellerMessages = (int) $conversation['seller_messages'];
+
+            MlBotOrder::where('user_id', $user->id)
+                ->whereIn('order_id', $check['order_ids'])
+                ->each(function (MlBotOrder $row) use ($buyerMessages, $sellerMessages, $check) {
+                    $justChecked = now();
+
+                    $row->buyer_messages = $buyerMessages;
+                    $row->seller_messages = $sellerMessages;
+                    $row->buyer_replied = $buyerMessages > 0 || $row->buyer_replied;
+                    $row->seller_messaged = $sellerMessages > 0 || $row->seller_messaged;
+                    $row->conversation_checked_at = $justChecked;
+
+                    // Vendedor ja mandou algo no chat e o comando continuava
+                    // pendente: marca como enviado para nao repetir mensagem.
+                    if (
+                        $row->seller_messaged
+                        && $row->status === MlBotOrder::STATUS_PENDING
+                        && trim((string) ($row->sent_message ?? '')) === ''
+                    ) {
+                        $row->status = MlBotOrder::STATUS_SENT;
+                        $row->sent_at = $row->sent_at ?? $justChecked;
+                    }
+
+                    $row->save();
+                });
+        }
+
+        return [
+            'start_date' => $startDate,
+            'scanned_orders' => is_countable($payload['orders']) ? count($payload['orders']) : 0,
+            'eligible' => is_countable($targets) ? count($targets) : 0,
+            'conversation_checks' => $targetsChecked,
+            'counts' => $this->botOrderCounts($user),
+        ];
+    }
+
+    public function botOrderCounts(User $user): array
+    {
+        $counts = ['pending' => 0, 'replied' => 0, 'sent' => 0, 'skipped' => 0];
+
+        foreach (
+            MlBotOrder::where('user_id', $user->id)
+                ->selectRaw('status, buyer_replied, count(*) as total')
+                ->groupBy('status', 'buyer_replied')
+                ->get() as $row
+        ) {
+            $bucket = $row->status === MlBotOrder::STATUS_SENT
+                ? 'sent'
+                : ($row->status === MlBotOrder::STATUS_SKIPPED
+                    ? 'skipped'
+                    : (($row->buyer_replied ? 1 : 0) ? 'replied' : 'pending'));
+            $counts[$bucket] += (int) $row->total;
+        }
+
+        return $counts;
+    }
+
+    public function mapBotGroup(MlBotGroup $group): array
+    {
+        return [
+            'id' => (int) $group->id,
+            'name' => (string) $group->name,
+            'template' => (string) ($group->template ?? ''),
+            'item_ids' => $group->items
+                ->map(fn (MlBotItem $item) => (string) $item->item_id)
+                ->values()
+                ->all(),
+            'items' => $group->items
+                ->map(fn (MlBotItem $item) => [
+                    'item_id' => (string) $item->item_id,
+                    'title' => (string) ($item->title ?? ''),
+                    'thumbnail' => (string) ($item->thumbnail ?? ''),
+                    'seller_sku' => (string) ($item->seller_sku ?? ''),
+                    'price' => $item->price !== null ? (float) $item->price : null,
+                    'status' => (string) ($item->item_status ?? ''),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    public function botOrdersForUser(User $user): array
+    {
+        return MlBotOrder::with('group:id,name,template')
+            ->where('user_id', $user->id)
+            ->orderByDesc('order_id')
+            ->get()
+            ->map(function (MlBotOrder $row) {
+                return [
+                    'order_id' => (int) $row->order_id,
+                    'pack_id' => $row->pack_id,
+                    'buyer_id' => $row->buyer_id,
+                    'title' => (string) ($row->title ?? ''),
+                    'thumbnail' => (string) ($row->thumbnail ?? ''),
+                    'sku' => (string) ($row->sku ?? ''),
+                    'qty' => (float) $row->qty,
+                    'status' => (string) $row->status,
+                    'bucket' => $row->bucket(),
+                    'buyer_replied' => (bool) $row->buyer_replied,
+                    'buyer_messages' => (int) $row->buyer_messages,
+                    'seller_messages' => (int) $row->seller_messages,
+                    'order_date' => $row->order_date?->toIso8601String(),
+                    'sent_at' => $row->sent_at?->toIso8601String(),
+                    'sent_message' => $row->sent_message,
+                    'group_id' => $row->group_id,
+                    'group_name' => (string) ($row->group?->name ?? ''),
+                    'template' => (string) ($row->group?->template ?? ''),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private static function inferredString(mixed $value, int $max = 200): ?string
+    {
+        $trimmed = trim((string) ($value ?? ''));
+        if ($trimmed === '') {
+            return null;
+        }
+        return mb_substr($trimmed, 0, $max);
     }
 }
