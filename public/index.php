@@ -5,6 +5,11 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
+// Guardas de execucao: configs grandes (ex.: vinculos de custo do ML) podem
+// estourar memoria/timeout do PHP e derrubar a resposta sem cabecalho CORS.
+ini_set('memory_limit', '512M');
+set_time_limit(180);
+
 // Determine if the application is in maintenance mode...
 if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
     require $maintenance;
