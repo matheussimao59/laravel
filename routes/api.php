@@ -198,6 +198,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/config', [MercadoLivreBotController::class, 'config']);
             Route::put('/config', [MercadoLivreBotController::class, 'saveConfig']);
             Route::get('/orders', [MercadoLivreBotController::class, 'orders']);
+            Route::get('/orders/{orderId}/message-options', [MercadoLivreBotController::class, 'messageOptions'])->whereNumber('orderId');
             Route::post('/scan', [MercadoLivreBotController::class, 'scan']);
             Route::post('/confirm', [MercadoLivreBotController::class, 'confirm']);
             Route::post('/skip', [MercadoLivreBotController::class, 'skip']);

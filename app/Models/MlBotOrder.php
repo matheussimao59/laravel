@@ -36,6 +36,8 @@ class MlBotOrder extends Model
         'sent_at',
         'order_date',
         'conversation_checked_at',
+        'send_status',
+        'send_reason',
     ];
 
     protected $casts = [

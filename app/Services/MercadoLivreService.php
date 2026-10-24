@@ -9,6 +9,7 @@ use App\Models\MlBotOrder;
 use App\Models\MlBotSetting;
 use App\Models\User;
 use App\Support\ExternalServiceException;
+use App\Support\MercadoLivreMessageOptions;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
@@ -91,14 +92,66 @@ final class MercadoLivreService
         return $token;
     }
 
+    public function messageOptions(string $accessToken, int $sellerId, int $orderId, ?int $packId): array
+    {
+        $targetId = ($packId ?? 0) > 0 ? $packId : $orderId;
+        $conversation = $this->readOrderConversation($accessToken, $sellerId, $packId, $orderId);
+        if (!($conversation['ok'] ?? false) && ($conversation['error_status'] ?? null) !== 404) {
+            throw new ExternalServiceException('Nao foi possivel verificar a conversa. Nenhuma mensagem foi enviada.', 422);
+        }
+        if (!empty($conversation['blocked_reason'])) {
+            return ['mode' => 'blocked', 'options' => [], 'block_reason' => $conversation['blocked_reason']];
+        }
+
+        $direct = ($conversation['buyer_messages'] ?? 0) > 0;
+        if (!$direct) {
+            try {
+                $guide = $this->request("/messages/action_guide/packs/{$targetId}?tag=post_sale", $accessToken);
+            } catch (ExternalServiceException $exception) {
+                $details = $exception->details();
+                if (!is_array($details) || ($details['cause'] ?? null) !== 'blocked_by_excepted_case') {
+                    throw $exception;
+                }
+                $direct = true;
+            }
+        }
+
+        if ($direct) {
+            return [
+                'mode' => 'direct',
+                'recipient_id' => $conversation['recipient_id'] ?? null,
+                'options' => [[
+                    'id' => 'OTHER', 'label' => 'Responder no chat', 'type' => 'text',
+                    'enabled' => true, 'disabled_reason' => null, 'cap_available' => null,
+                    'char_limit' => min(350, (int) ($conversation['char_limit'] ?? 350)),
+                    'template_id' => null, 'text' => '',
+                ]],
+                'block_reason' => null,
+            ];
+        }
+
+        $caps = $this->request("/messages/action_guide/packs/{$targetId}/caps_available?tag=post_sale", $accessToken);
+        $options = MercadoLivreMessageOptions::fromGuide(is_array($guide) ? $guide : [], is_array($caps) ? $caps : []);
+
+        return [
+            'mode' => 'action_guide',
+            'options' => $options,
+            'block_reason' => array_filter($options, fn (array $option) => $option['enabled']) === []
+                ? 'Nenhum motivo de texto livre ou personalizacao com limite confirmado esta disponivel para esta compra.'
+                : null,
+        ];
+    }
+
     public function sendCustomization(
         string $accessToken,
         int $sellerId,
         int $orderId,
         ?int $packId,
         string $message,
+        string $optionId = 'OTHER',
+        ?string $templateId = null,
     ): array {
-        if (mb_strlen($message) > 350) {
+        if ($optionId === 'OTHER' && mb_strlen($message) > 350) {
             return [
                 'ok' => false,
                 'status' => 422,
@@ -110,30 +163,35 @@ final class MercadoLivreService
         // Sem pack_id, a API de mensageria usa o order_id na mesma rota /packs.
         $targetId = ($packId ?? 0) > 0 ? $packId : $orderId;
         $path = "/messages/packs/{$targetId}/sellers/{$sellerId}?tag=post_sale";
+        $attempted = false;
 
         try {
-            $conversation = $this->readOrderConversation($accessToken, $sellerId, $packId, $orderId);
-            $directMessage = ($conversation['buyer_messages'] ?? 0) > 0;
-
-            if (!$directMessage) {
-                $path = "/messages/action_guide/packs/{$targetId}?tag=post_sale";
-                try {
-                    $this->request($path, $accessToken);
-                } catch (ExternalServiceException $exception) {
-                    $details = $exception->details();
-                    if (!is_array($details) || ($details['cause'] ?? null) !== 'blocked_by_excepted_case') {
-                        throw $exception;
-                    }
-                    // Produtos com tempo de fabricacao usam a mensageria direta,
-                    // conforme a excecao informada pelo proprio Mercado Livre.
-                    $directMessage = true;
+            // Revalida no envio: o preview nao reserva cap nem autoriza POSTs futuros.
+            $context = $this->messageOptions($accessToken, $sellerId, $orderId, $packId);
+            if ($context['block_reason']) {
+                return ['ok' => false, 'status' => 422, 'error' => 'ml_message_not_allowed', 'message' => $context['block_reason'], 'attempted' => false, 'stop' => $context['mode'] === 'blocked'];
+            }
+            $selected = null;
+            foreach ($context['options'] as $option) {
+                if ($option['id'] === $optionId && ($option['template_id'] ?? null) === $templateId && $option['enabled']) {
+                    $selected = $option;
+                    break;
                 }
             }
+            if ($selected === null) {
+                return ['ok' => false, 'status' => 422, 'error' => 'ml_message_option_unavailable', 'message' => 'O motivo ou modelo escolhido nao esta disponivel. Consulte as opcoes novamente.', 'attempted' => false];
+            }
+            if ($selected['type'] === 'template') {
+                $message = $selected['text'];
+            } elseif (trim($message) === '' || mb_strlen($message) > $selected['char_limit']) {
+                return ['ok' => false, 'status' => 422, 'error' => 'ml_message_invalid_text', 'message' => 'Revise o texto e o limite de caracteres informado pelo Mercado Livre.', 'attempted' => false];
+            }
 
+            $directMessage = $context['mode'] === 'direct';
             if ($directMessage) {
                 // Nas conversas migradas, quem responde e o agente do ML.
                 // Reutiliza o remetente real do chat, nao um ID fixo de comprador.
-                $recipientId = (int) ($conversation['recipient_id'] ?? 0);
+                $recipientId = (int) ($context['recipient_id'] ?? 0);
                 if ($recipientId <= 0) {
                     $path = "/orders/{$orderId}";
                     $order = $this->request($path, $accessToken);
@@ -150,26 +208,37 @@ final class MercadoLivreService
                     'text' => $message,
                 ];
             } else {
-                // REQUEST_VARIANTS exige um template fixo do ML. O texto
-                // personalizado do grupo deve usar a opcao OTHER.
                 $path = "/messages/action_guide/packs/{$targetId}/option?tag=post_sale";
-                $body = ['option_id' => 'OTHER', 'text' => $message];
+                $body = $selected['type'] === 'template'
+                    ? ['option_id' => $optionId, 'template_id' => $selected['template_id']]
+                    : ['option_id' => $optionId, 'text' => $message];
             }
 
             // Uma unica rota de escrita: nunca tenta outro POST apos uma
             // resposta ambigua, para evitar mensagens duplicadas.
+            $attempted = true;
             $response = $this->request($path, $accessToken, 'POST', $body);
             $sentMessage = $response['messages'][0] ?? $response;
-            if (
-                in_array($sentMessage['status'] ?? null, ['moderated', 'rejected'], true)
-                || in_array($sentMessage['message_moderation']['status'] ?? null, ['rejected', 'moderated'], true)
-            ) {
+            $moderationReason = $this->messageModerationReason($sentMessage);
+            if ($moderationReason !== null) {
                 return [
                     'ok' => false,
                     'status' => 422,
                     'error' => 'ml_message_moderated',
-                    'message' => 'O Mercado Livre bloqueou a mensagem na moderacao. Revise o texto do grupo antes de tentar novamente.',
+                    'message' => "O Mercado Livre bloqueou a mensagem ({$moderationReason}). Novas tentativas pelo bot foram interrompidas. Confira a compra no Mercado Livre.",
+                    'attempted' => true,
                     'details' => $response,
+                ];
+            }
+            if (
+                !is_array($sentMessage) || $sentMessage === []
+                || in_array($sentMessage['status'] ?? null, ['pending', 'pending_translation'], true)
+                || ($sentMessage['message_moderation']['status'] ?? null) === 'pending'
+            ) {
+                return [
+                    'ok' => false, 'status' => 409, 'error' => 'ml_message_delivery_uncertain',
+                    'message' => 'O Mercado Livre ainda nao confirmou o resultado. Confira o chat; o bot nao repetira o envio.',
+                    'attempted' => true, 'uncertain' => true, 'details' => $response,
                 ];
             }
 
@@ -177,7 +246,9 @@ final class MercadoLivreService
                 'ok' => true,
                 'order_id' => $orderId,
                 'pack_id' => $packId,
-                'option_id' => $directMessage ? null : 'OTHER',
+                'option_id' => $directMessage ? null : $optionId,
+                'sent_text' => $message,
+                'attempted' => true,
                 'path_used' => $path,
                 'response' => $response,
             ];
@@ -193,6 +264,7 @@ final class MercadoLivreService
                 'ok' => false,
                 'status' => $upstreamStatus >= 500 ? 502 : (in_array($upstreamStatus, [409, 429], true) ? $upstreamStatus : 422),
                 'error' => 'ml_message_send_failed',
+                'attempted' => $attempted,
                 'message' => "O Mercado Livre recusou o envio (HTTP {$upstreamStatus}): {$reason}",
                 'details' => ['path' => $path, 'upstream_status' => $upstreamStatus, 'response' => $details],
             ];
@@ -201,6 +273,7 @@ final class MercadoLivreService
                 'ok' => false,
                 'status' => 502,
                 'error' => 'ml_message_connection_failed',
+                'attempted' => $attempted,
                 'message' => 'A conexao com o Mercado Livre falhou. Confira o chat da compra antes de tentar novamente, pois o envio pode ter sido recebido.',
             ];
         }
@@ -340,6 +413,20 @@ final class MercadoLivreService
     public function cachedSellerForUser(User $user): ?array
     {
         return $this->sellerFromAccount($user->mercadoLivreAccount()->first());
+    }
+
+    public function sellerForUser(User $user, string $accessToken): array
+    {
+        $seller = $this->cachedSellerForUser($user);
+        if ((int) ($seller['id'] ?? 0) <= 0) {
+            $seller = $this->request('/users/me', $accessToken);
+            if (!is_array($seller) || (int) ($seller['id'] ?? 0) <= 0) {
+                throw new ExternalServiceException('Conta Mercado Livre sem vendedor valido.', 422);
+            }
+            $this->rememberSellerForUser($user, $seller);
+        }
+
+        return $seller;
     }
 
     public function disconnectAccountForUser(User $user): void
@@ -529,7 +616,7 @@ final class MercadoLivreService
         array $headers = [],
     ): mixed {
         $response = null;
-        $attempts = 3;
+        $attempts = strtoupper($method) === 'GET' ? 3 : 1;
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             $client = Http::acceptJson()
@@ -1316,6 +1403,22 @@ final class MercadoLivreService
      * se o cliente ja escreveu no chat (aba propria) ou se o vendedor
      * ja respondeu (evita mensagem duplicada).
      */
+    private function messageModerationReason(mixed $message): ?string
+    {
+        if (!is_array($message)) {
+            return null;
+        }
+        $moderation = $message['message_moderation'] ?? $message['moderation'] ?? [];
+        if (
+            in_array(strtolower((string) ($message['status'] ?? '')), ['moderated', 'rejected'], true)
+            || in_array(strtolower((string) ($moderation['status'] ?? '')), ['moderated', 'rejected'], true)
+        ) {
+            return is_string($moderation['reason'] ?? null) ? $moderation['reason'] : 'moderated';
+        }
+
+        return null;
+    }
+
     public function readOrderConversation(
         string $accessToken,
         int $sellerId,
@@ -1337,6 +1440,9 @@ final class MercadoLivreService
             $lastBuyerText = null;
             $lastBuyerDate = null;
             $recipientId = null;
+            $blockedReason = in_array($payload['conversation_status']['status'] ?? null, ['blocked', 'closed'], true)
+                ? 'O Mercado Livre informa que esta conversa esta bloqueada ou encerrada.'
+                : null;
 
             foreach ($conversation as $message) {
                 if (!is_array($message)) {
@@ -1348,6 +1454,18 @@ final class MercadoLivreService
                 }
 
                 if ($fromUserId === $sellerId) {
+                    $moderationReason = $this->messageModerationReason($message);
+                    if ($moderationReason !== null) {
+                        $blockedReason = "Existe uma mensagem bloqueada pelo Mercado Livre ({$moderationReason}). Nao sera feita uma nova tentativa pelo bot.";
+                        continue;
+                    }
+                    if (
+                        in_array($message['status'] ?? null, ['pending', 'pending_translation'], true)
+                        || ($message['message_moderation']['status'] ?? null) === 'pending'
+                    ) {
+                        $blockedReason = 'Existe uma mensagem aguardando processamento ou moderacao. Confira o chat; o bot nao repetira o envio.';
+                        continue;
+                    }
                     $sellerMessages++;
                     if ($recipientId === null && (int) ($message['to']['user_id'] ?? 0) > 0) {
                         $recipientId = (int) $message['to']['user_id'];
@@ -1374,9 +1492,12 @@ final class MercadoLivreService
                 'seller_messages' => $sellerMessages,
                 'last_buyer_text' => $lastBuyerText,
                 'recipient_id' => $recipientId,
+                'blocked_reason' => $blockedReason,
+                'char_limit' => $payload['seller_max_message_length'] ?? 350,
             ];
-        } catch (ExternalServiceException) {
-            // Sem acesso ao chat, a API de motivos decidira se pode iniciar a conversa.
+        } catch (ExternalServiceException $exception) {
+            $metadata = json_decode($exception->getMessage(), true);
+            $errorStatus = (int) ($metadata['status'] ?? $exception->status());
         }
 
         return [
@@ -1385,6 +1506,7 @@ final class MercadoLivreService
             'seller_messages' => 0,
             'last_buyer_text' => null,
             'error' => 'ml_conversation_unavailable',
+            'error_status' => $errorStatus,
         ];
     }
 
@@ -1612,6 +1734,7 @@ final class MercadoLivreService
                     // pendente: marca como enviado para nao repetir mensagem.
                     if (
                         $row->seller_messaged
+                        && $row->send_status === null
                         && $row->status === MlBotOrder::STATUS_PENDING
                         && trim((string) ($row->sent_message ?? '')) === ''
                     ) {
@@ -1700,6 +1823,8 @@ final class MercadoLivreService
                     'order_date' => $row->order_date?->toIso8601String(),
                     'sent_at' => $row->sent_at?->toIso8601String(),
                     'sent_message' => $row->sent_message,
+                    'send_status' => $row->send_status,
+                    'send_reason' => $row->send_reason,
                     'group_id' => $row->group_id,
                     'group_name' => (string) ($row->group?->name ?? ''),
                     'template' => (string) ($row->group?->template ?? ''),
