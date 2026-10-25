@@ -756,6 +756,17 @@ final class ShippingOrderController
                 }
             }
 
+            // 3) Linha antiga sem sku, anuncio e variacao: nao existe outra linha do mesmo
+            //    pedido para comparar; a nova preenche os campos faltantes da mesma compra.
+            //    Pedidos em grupo ficam preservados porque suas linhas sempre tem item.
+            if ($incomingFullIdentity !== '') {
+                foreach ($candidates as $candidate) {
+                    if ($this->importedItemFullIdentity($candidate) === '' && $this->importedItemIdentity($candidate) === '') {
+                        return $candidate;
+                    }
+                }
+            }
+
             $incomingRaw = is_array($incomingRow['row_raw'] ?? null) ? $incomingRow['row_raw'] : [];
             if ((int) ($incomingRaw['column_shift_detected'] ?? 0) !== 0 && $candidates->count() === 1) {
                 return $candidates->first();

@@ -149,7 +149,7 @@ class ApiModulesTest extends TestCase
         ])->assertStatus(403);
     }
 
-    public function test_mercado_livre_config_show_prefers_env_credentials_for_public_oauth_data(): void
+    public function test_mercado_livre_config_show_prefers_panel_credentials_over_env(): void
     {
         $user = User::factory()->create([
             'role' => 'admin',
@@ -176,11 +176,11 @@ class ApiModulesTest extends TestCase
 
         $this->getJson('/api/integrations/mercado-livre/config')
             ->assertOk()
-            ->assertJsonPath('config.client_id', 'env-client-id')
-            ->assertJsonPath('config.redirect_uri', 'https://unicaprint.com.br/integracoes/mercado-livre/callback')
+            ->assertJsonPath('config.client_id', 'panel-client-id')
+            ->assertJsonPath('config.redirect_uri', 'https://unicaprint.com.br/mercado-livre')
             ->assertJsonPath('config.has_client_secret', true)
-            ->assertJsonPath('config.source', 'env')
-            ->assertJsonMissing(['client_secret' => 'env-client-secret']);
+            ->assertJsonPath('config.source', 'panel')
+            ->assertJsonMissing(['client_secret' => 'panel-client-secret']);
     }
 
     public function test_mercado_livre_notifications_endpoint_accepts_public_webhook_calls(): void
@@ -238,7 +238,7 @@ class ApiModulesTest extends TestCase
         });
     }
 
-    public function test_oauth_token_exchange_prefers_env_credentials_over_saved_panel_config(): void
+    public function test_oauth_token_exchange_prefers_saved_panel_config_over_env(): void
     {
         $admin = User::factory()->create([
             'role' => 'admin',
@@ -278,8 +278,8 @@ class ApiModulesTest extends TestCase
 
         Http::assertSent(function ($request) {
             return $request->url() === 'https://api.mercadolibre.com/oauth/token'
-                && $request['client_id'] === 'env-client-id'
-                && $request['client_secret'] === 'env-client-secret'
+                && $request['client_id'] === 'panel-client-id'
+                && $request['client_secret'] === 'panel-client-secret'
                 && $request['code'] === 'oauth-code';
         });
     }
@@ -549,7 +549,7 @@ class ApiModulesTest extends TestCase
                 'recipient_name' => 'Maria Silva',
                 'tracking_number' => 'BR 123.456-789',
                 'source_file_name' => 'arquivo-2.xlsx',
-                'shipping_deadline' => '2026-03-20',
+                'shipping_deadline' => '2027-03-20',
                 'row_raw' => [
                     'pedido' => 'Pedido #MLB123',
                     'nome_do_anuncio' => 'Agenda Premium',
@@ -574,7 +574,7 @@ class ApiModulesTest extends TestCase
         $this->assertSame('BR 123.456-789', $orders[0]->tracking_number);
         $this->assertSame('Observacao definida no sistema', $orders[0]->observations);
         $this->assertSame(1, (int) $orders[0]->product_qty);
-        $this->assertSame('2026-03-20', $orders[0]->shipping_deadline);
+        $this->assertSame('2027-03-20', $orders[0]->shipping_deadline);
     }
 
     public function test_admin_can_import_shopee_rows_filter_by_month_and_auto_create_unique_products(): void

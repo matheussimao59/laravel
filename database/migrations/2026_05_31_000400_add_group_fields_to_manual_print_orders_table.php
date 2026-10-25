@@ -13,7 +13,11 @@ return new class() extends Migration
             Schema::hasColumn('manual_print_orders', 'platform_order_id')
             && $this->indexExists('manual_print_orders', 'manual_print_orders_user_platform_unique')
         ) {
-            DB::statement('alter table manual_print_orders drop index manual_print_orders_user_platform_unique');
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                DB::statement('drop index manual_print_orders_user_platform_unique');
+            } else {
+                DB::statement('alter table manual_print_orders drop index manual_print_orders_user_platform_unique');
+            }
         }
 
         Schema::table('manual_print_orders', function (Blueprint $table) {
@@ -42,6 +46,16 @@ return new class() extends Migration
 
     private function indexExists(string $table, string $index): bool
     {
-        return count(DB::select("show index from {$table} where Key_name = ?", [$index])) > 0;
+        if (in_array(Schema::getConnection()->getDriverName(), ['mysql', 'mariadb'])) {
+            return count(DB::select("show index from {$table} where Key_name = ?", [$index])) > 0;
+        }
+
+        foreach (Schema::getIndexes($table) as $existing) {
+            if (strtolower((string) ($existing['name'] ?? '')) === strtolower($index)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 };

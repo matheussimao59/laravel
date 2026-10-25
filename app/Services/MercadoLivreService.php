@@ -1168,7 +1168,7 @@ final class MercadoLivreService
      *
      * @param array<string, string> $pathsByKey
      */
-    private function poolGet(array $pathsByKey, string $accessToken, int $concurrency = 10, array $headers = []): array
+    private function poolGet(array $pathsByKey, string $accessToken, int $concurrency = 10, array $headers = [], int $timeout = 45): array
     {
         if ($pathsByKey === []) {
             return [];
@@ -1183,11 +1183,11 @@ final class MercadoLivreService
                 // Pausa curta entre lotes para respeitar o rate limit do ML.
                 usleep(120000);
             }
-            $responses = Http::pool(function (Pool $pool) use ($chunk, $pathsByKey, $accessToken, $headers) {
+            $responses = Http::pool(function (Pool $pool) use ($chunk, $pathsByKey, $accessToken, $headers, $timeout) {
                 foreach ($chunk as $key) {
                     $entry = $pool->as($key)
                         ->acceptJson()
-                        ->timeout(45)
+                        ->timeout($timeout)
                         ->withToken($accessToken);
                     if ($headers !== []) {
                         $entry = $entry->withHeaders($headers);
@@ -1436,6 +1436,124 @@ final class MercadoLivreService
         }
 
         return null;
+    }
+
+    private function personalizationGet(string $path, string $token): array
+    {
+        $response = Http::acceptJson()->withToken($token)->withHeaders(['x-format-new' => 'true'])
+            ->connectTimeout(5)->timeout(12)->get($this->baseUrl() . $path);
+        $data = $this->decodeResponse($response, $path);
+        if (!is_array($data)) throw new ExternalServiceException('Resposta invalida do Mercado Livre.', 502);
+
+        return $data;
+    }
+
+    public function pendingOrdersPage(User $user, int $offset = 0): array
+    {
+        $token = $this->accessTokenForUser($user);
+        $seller = $this->sellerForUser($user, $token);
+        $query = http_build_query([
+            'seller' => $seller['id'], 'order.status' => 'paid,partially_refunded',
+            'tags.not' => 'delivered,shipped,not_delivered,cancelled', 'sort' => 'date_desc', 'limit' => 10, 'offset' => $offset,
+        ]);
+        $data = $this->personalizationGet('/orders/search?' . $query, $token);
+        if (!is_array($data['results'] ?? null)) throw new ExternalServiceException('Lista de pedidos indisponivel.', 502);
+        $paths = [];
+        foreach ($data['results'] as $order) {
+            if (!is_array($order)) continue;
+            if (!empty($order['shipping']['id'])) $paths[(string) $order['shipping']['id']] = '/shipments/' . rawurlencode((string) $order['shipping']['id']);
+        }
+        $shipments = $this->poolGet($paths, $token, 5, [], 12);
+        $orders = [];
+        foreach ($data['results'] as $order) {
+            if (!is_array($order) || (int) ($order['seller']['id'] ?? 0) !== (int) $seller['id']) continue;
+            $shipment = $shipments[(string) ($order['shipping']['id'] ?? '')] ?? null;
+            if (is_array($shipment) && isset($shipment['sender_id']) && (int) $shipment['sender_id'] !== (int) $seller['id']) $shipment = null;
+            $orders[] = ['order' => $order, 'shipment' => is_array($shipment) ? $shipment : null];
+        }
+        $count = count($data['results']);
+        $total = isset($data['paging']['total']) ? (int) $data['paging']['total'] : null;
+        $more = $count > 0 && ($total !== null ? $offset + $count < $total : $count >= 10);
+
+        return ['seller_id' => (int) $seller['id'], 'orders' => $orders, 'next_offset' => $offset + $count,
+            'has_more' => $more, 'total_candidates' => $total, 'complete' => !$more && !($count === 0 && $total > $offset)];
+    }
+
+    public function pendingOrderSnapshot(User $user, string $orderId): array
+    {
+        $token = $this->accessTokenForUser($user);
+        $seller = $this->sellerForUser($user, $token);
+        $order = $this->personalizationGet('/orders/' . rawurlencode($orderId), $token);
+        if ((int) ($order['seller']['id'] ?? 0) !== (int) $seller['id'] || (string) ($order['id'] ?? '') !== $orderId) {
+            throw new ExternalServiceException('Pedido nao pertence a esta conta do Mercado Livre.', 422);
+        }
+        $shipment = !empty($order['shipping']['id'])
+            ? $this->personalizationGet('/shipments/' . rawurlencode((string) $order['shipping']['id']), $token) : null;
+        if ($shipment && isset($shipment['sender_id']) && (int) $shipment['sender_id'] !== (int) $seller['id']) {
+            throw new ExternalServiceException('Nao foi possivel verificar o envio desta conta.', 422);
+        }
+        $packSize = null;
+        if (!empty($order['pack_id'])) {
+            try {
+                $pack = $this->personalizationGet('/packs/' . rawurlencode((string) $order['pack_id']), $token);
+                $ids = array_map('strval', array_column(is_array($pack['orders'] ?? null) ? $pack['orders'] : [], 'id'));
+                if (in_array($orderId, $ids, true)) $packSize = count($ids);
+            } catch (ExternalServiceException|ConnectionException $exception) {
+                if ($exception instanceof ExternalServiceException && $exception->status() === 429) throw $exception;
+                // Sem confirmacao do tamanho do carrinho, a personalizacao exigira revisao.
+            }
+        }
+
+        return ['seller_id' => (int) $seller['id'], 'order' => $order, 'shipment' => $shipment, 'pack_size' => $packSize];
+    }
+
+    /** Le todas as paginas disponiveis; uma leitura parcial nunca autoriza preenchimento. */
+    public function personalizationConversation(User $user, string $orderId, ?string $packId, int $buyerId): array
+    {
+        $token = $this->accessTokenForUser($user);
+        $seller = $this->sellerForUser($user, $token);
+        $target = $packId ?: $orderId;
+        $messages = []; $seen = []; $seenAll = []; $total = null; $offset = 0; $unsettled = false; $deadline = microtime(true) + 25;
+        $agents = [3037675074, 3020819166, 3037204123, 3037204279, 3037674934, 3037204685];
+        for ($page = 0; $page < 20; $page++) {
+            if (microtime(true) > $deadline) break;
+            $path = "/messages/packs/{$target}/sellers/{$seller['id']}?offset={$offset}&limit=50&tag=post_sale&mark_as_read=false";
+            $data = $this->personalizationGet($path, $token);
+            $rows = $data['messages'] ?? $data['conversation'] ?? null;
+            if (!is_array($rows)) throw new ExternalServiceException('Conversa retornada em formato desconhecido. Revise manualmente.', 422);
+            $currentTotal = isset($data['paging']['total']) ? (int) $data['paging']['total'] : null;
+            if ($total !== null && $currentTotal !== null && $total !== $currentTotal) {
+                return ['messages' => [], 'complete' => false, 'note' => 'O chat mudou durante a leitura. Consulte novamente para conferir todas as mensagens.'];
+            }
+            $total ??= $currentTotal;
+            $newRows = 0;
+            foreach ($rows as $index => $message) {
+                if (!is_array($message)) continue;
+                $rawId = (string) ($message['id'] ?? $message['message_id'] ?? hash('sha256', json_encode($message)));
+                if (!isset($seenAll[$rawId])) { $seenAll[$rawId] = true; $newRows++; }
+                $from = (int) ($message['from']['user_id'] ?? 0);
+                $conversationId = (string) ($message['conversation_id'] ?? '') ?: (string) ($data['conversation_status']['path'] ?? '');
+                $agent = in_array($from, $agents, true) && str_contains($conversationId, "/packs/{$target}/sellers/{$seller['id']}/conversations/");
+                if ($from === (int) $seller['id'] || ($from !== $buyerId && !$agent) || $from <= 0) continue;
+                if (in_array($message['status'] ?? '', ['pending', 'pending_translation'], true) || ($message['message_moderation']['status'] ?? '') === 'pending') { $unsettled = true; continue; }
+                if ($this->messageModerationReason($message) !== null) continue;
+                $content = $message['text'] ?? $message['message'] ?? '';
+                $text = is_array($content) ? (string) ($content['plain'] ?? '') : (string) $content;
+                $id = (string) ($message['id'] ?? $message['message_id'] ?? hash('sha256', json_encode($message)));
+                if (isset($seen[$id])) continue;
+                $seen[$id] = true;
+                $messages[] = ['id' => $id, 'date' => $message['message_date']['created'] ?? $message['date'] ?? null,
+                    'text' => $text, 'has_attachments' => !empty($message['message_attachments'] ?? $message['attachments'] ?? []), 'via_agent' => $agent];
+            }
+            $offset += count($rows);
+            $done = $total !== null ? $offset >= $total : count($rows) < (int) ($data['paging']['limit'] ?? 50);
+            if ($done) {
+                return ['messages' => $messages, 'complete' => !$unsettled, 'note' => $unsettled ? 'Ha mensagens do comprador aguardando processamento. Revise antes de preencher.' : null];
+            }
+            if ($newRows === 0) break;
+        }
+
+        return ['messages' => $messages, 'complete' => false, 'note' => 'Leitura parcial por limite de tempo ou paginas. Nenhum preenchimento automatico foi autorizado.'];
     }
 
     public function readOrderConversation(

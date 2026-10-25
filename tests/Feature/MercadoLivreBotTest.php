@@ -52,7 +52,8 @@ class MercadoLivreBotTest extends TestCase
             ->assertJsonPath('summary.scanned_orders', 2)
             ->assertJsonPath('summary.eligible', 1)
             ->assertJsonPath('summary.conversation_checks', 1)
-            ->assertJsonPath('counts.replied', 2)
+            ->assertJsonPath('counts.replied', 0)
+            ->assertJsonPath('counts.sent', 2)
             ->assertJsonCount(2, 'orders');
 
         foreach ([1001, 1002] as $orderId) {

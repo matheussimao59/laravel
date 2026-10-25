@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\MercadoLivreConfigController;
 use App\Http\Controllers\Api\MercadoLivreBotController;
 use App\Http\Controllers\Api\MercadoLivreSaleProductController;
+use App\Http\Controllers\Api\MlPendingOrderController;
 use App\Http\Controllers\Api\ModeloController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
@@ -183,6 +184,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/modelos/{modelo}', [ModeloController::class, 'destroy']);
 
     Route::prefix('integrations/mercado-livre')->group(function () {
+        Route::get('/pending-orders', [MlPendingOrderController::class, 'index']);
+        Route::post('/pending-orders/sync', [MlPendingOrderController::class, 'syncPage']);
+        Route::post('/pending-orders/personalizations', [MlPendingOrderController::class, 'lookup']);
+        Route::post('/pending-orders/{id}/analyze', [MlPendingOrderController::class, 'analyze'])->whereNumber('id');
+        Route::get('/pending-orders/{id}/messages', [MlPendingOrderController::class, 'messages'])->whereNumber('id');
+        Route::put('/pending-orders/{id}/personalization', [MlPendingOrderController::class, 'review'])->whereNumber('id');
         Route::get('/sale-products', [MercadoLivreSaleProductController::class, 'index']);
         Route::post('/sale-products/sync', [MercadoLivreSaleProductController::class, 'sync']);
         Route::post('/sale-products/{id}/refresh', [MercadoLivreSaleProductController::class, 'refresh'])->whereNumber('id');
