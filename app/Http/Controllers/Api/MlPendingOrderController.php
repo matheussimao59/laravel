@@ -87,6 +87,7 @@ final class MlPendingOrderController
             $locked = MlPendingOrder::whereKey($row->id)->lockForUpdate()->firstOrFail();
             $locked->update([
                 'personalization_name' => $name ?: null, 'personalization_age' => $age ?: null,
+                'personalization_pairs' => null,
                 'personalization_status' => $confirmed ? 'confirmed' : 'review', 'personalization_source' => 'manual',
                 'group_confirmed' => $request->boolean('apply_to_all_items'), 'manual_note' => $note ?: null,
                 'observation' => ($confirmed ? "Nome: {$name} | Idade: {$age}" : 'Personalizacao em revisao; nao preencher automaticamente.') . ($note !== '' ? "\nObservacao: {$note}" : ''),

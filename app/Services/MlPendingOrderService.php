@@ -110,12 +110,11 @@ final class MlPendingOrderService
                 if ($member->personalization_source !== 'manual') {
                     $member->personalization_name = $result['name'];
                     $member->personalization_age = $result['age'];
+                    $member->personalization_pairs = $result['pairs'];
                     $member->personalization_status = $result['status'];
                     $member->analysis_note = $result['note'];
                     $member->evidence = $result['evidence'];
-                    $member->observation = $result['status'] === 'identified'
-                        ? "Nome: {$result['name']} | Idade: {$result['age']}"
-                        : $result['note'];
+                    $member->observation = $this->observation($result);
                 }
                 $member->save();
             }
@@ -124,9 +123,27 @@ final class MlPendingOrderService
         return ['analyzed' => true, 'complete' => $conversation['complete'], 'message' => $result['note']];
     }
 
+    /** Observacao humana que vai para a impressao: um ou dois pares nome/idade. */
+    private function observation(array $result): string
+    {
+        if ($result['status'] !== 'identified') return $result['note'];
+        if (count($result['pairs']) === 2) {
+            [$first, $second] = $result['pairs'];
+
+            return "Nome 1: {$first['name']} | Idade 1: {$first['age']} | Nome 2: {$second['name']} | Idade 2: {$second['age']}";
+        }
+
+        return "Nome: {$result['name']} | Idade: {$result['age']}";
+    }
+
     public function ready(MlPendingOrder $row): bool
     {
-        if ($row->is_pending !== true || !$row->personalization_name || !$row->personalization_age) return false;
+        if ($row->is_pending !== true) return false;
+        // Duas personalizacoes identificadas em pares dispensam o campo unico nome/idade.
+        $hasPairData = is_array($row->personalization_pairs) && count($row->personalization_pairs) >= 2;
+        if (!$row->personalization_name || !$row->personalization_age) {
+            if (!$hasPairData) return false;
+        }
 
         return ($row->personalization_source === 'manual' && $row->personalization_status === 'confirmed')
             || ($row->personalization_status === 'identified' && $row->messages_complete);
@@ -147,11 +164,12 @@ final class MlPendingOrderService
             if ($packAlias) $ready = $ready && $matches->every(fn ($row) => $row->pack_size !== null && $row->pack_size === $matches->count() && $row->group_confirmed);
             if ($matches->count() > 1) {
                 $ready = $ready && $matches->every(fn ($row) => $row->group_confirmed)
-                    && $matches->map(fn ($row) => [$row->personalization_name, $row->personalization_age])->uniqueStrict()->count() === 1;
+                    && $matches->map(fn ($row) => [$row->personalization_name, $row->personalization_age, $row->personalization_pairs])->uniqueStrict()->count() === 1;
             }
             $result[(string) $id] = [
                 'ready' => $ready, 'order_id' => $first->order_id, 'status' => $ready ? $first->personalization_status : 'review',
                 'name' => $ready ? $first->personalization_name : null, 'age' => $ready ? $first->personalization_age : null,
+                'pairs' => $ready ? ($first->personalization_pairs ?? []) : null,
                 'observation' => $ready ? $first->observation : null,
                 'group_confirmed' => $matches->every(fn ($row) => $row->group_confirmed),
                 'updated_at' => $matches->max('updated_at')?->toIso8601String(),

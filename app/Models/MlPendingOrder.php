@@ -13,7 +13,7 @@ class MlPendingOrder extends Model
     {
         return [
             'items' => 'array', 'evidence' => 'array', 'is_pending' => 'boolean',
-            'order_tags' => 'array',
+            'order_tags' => 'array', 'personalization_pairs' => 'array',
             'pack_size' => 'integer', 'buyer_id' => 'integer', 'seller_id' => 'integer',
             'group_confirmed' => 'boolean', 'messages_complete' => 'boolean',
             'ordered_at' => 'datetime', 'messages_checked_at' => 'datetime', 'synced_at' => 'datetime',

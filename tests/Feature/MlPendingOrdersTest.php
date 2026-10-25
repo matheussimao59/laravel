@@ -141,6 +141,50 @@ class MlPendingOrdersTest extends TestCase
         $this->getJson('/api/auth/me')->assertOk();
     }
 
+    public function test_mila_saves_two_name_age_pairs_and_lookup_exposes_them(): void
+    {
+        $row = $this->seedPendingOrder();
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.mercadolibre.com/orders/search*' => Http::response(['results' => [$this->order()], 'paging' => ['total' => 1]]),
+            'https://api.mercadolibre.com/orders/1001' => Http::response($this->order()),
+            'https://api.mercadolibre.com/shipments/9001' => Http::response(['id' => 9001, 'sender_id' => 123, 'status' => 'ready_to_ship']),
+            'https://api.mercadolibre.com/packs/2001' => Http::response(['id' => 2001, 'orders' => [['id' => 1001]]]),
+            'https://api.mercadolibre.com/messages/packs/2001/sellers/123*' => function (Request $request) {
+                $first = array_map(fn ($i) => ['id' => 's' . $i, 'from' => ['user_id' => 123], 'text' => 'Bom dia'], range(1, 49));
+                $first[] = ['id' => 'buyer-pairs', 'from' => ['user_id' => 456], 'text' => 'Matheus 8 anos Lara 8 anos'];
+                $last = [['id' => 'buyer-thanks', 'from' => ['user_id' => 456], 'text' => 'Obrigado!'], ['id' => 'seller-late', 'from' => ['user_id' => 123], 'text' => 'Ok']];
+                return Http::response(['paging' => ['total' => 52, 'limit' => 50], 'messages' => (int) $request['offset'] === 0 ? $first : $last]);
+            },
+        ]);
+        $this->postJson('/api/integrations/mercado-livre/pending-orders/' . $row->id . '/analyze')->assertOk()->assertJsonPath('complete', true);
+        $row->refresh();
+        $this->assertSame('identified', $row->personalization_status);
+        $this->assertNull($row->personalization_name);
+        $this->assertNull($row->personalization_age);
+        $this->assertSame([['name' => 'Matheus', 'age' => '8 anos'], ['name' => 'Lara', 'age' => '8 anos']], $row->personalization_pairs);
+        $this->assertSame('Nome 1: Matheus | Idade 1: 8 anos | Nome 2: Lara | Idade 2: 8 anos', $row->observation);
+        $this->postJson('/api/integrations/mercado-livre/pending-orders/personalizations', ['ids' => ['1001']])
+            ->assertOk()
+            ->assertJsonPath('personalizations.1001.ready', true)
+            ->assertJsonPath('personalizations.1001.pairs.0.name', 'Matheus')
+            ->assertJsonPath('personalizations.1001.pairs.1.name', 'Lara');
+        Http::assertNotSent(fn (Request $request) => $request->method() !== 'GET');
+    }
+
+    public function test_manual_review_clears_previous_pairs(): void
+    {
+        $row = $this->seedPendingOrder(); $this->fakeMl();
+        $row->update(['personalization_pairs' => [['name' => 'Matheus', 'age' => '8 anos'], ['name' => 'Lara', 'age' => '8 anos']]]);
+        $this->putJson('/api/integrations/mercado-livre/pending-orders/' . $row->id . '/personalization', [
+            'name' => 'Bruno', 'age' => '8 anos', 'confirmed' => true, 'apply_to_all_items' => false,
+        ])->assertOk();
+        $fresh = $row->fresh();
+        $this->assertNull($fresh->personalization_pairs);
+        $this->assertSame('manual', $fresh->personalization_source);
+        $this->assertSame('Nome: Bruno | Idade: 8 anos', $fresh->observation);
+    }
+
     private function account(): User
     {
         config()->set('services.mercado_livre.base_url', 'https://api.mercadolibre.com');
