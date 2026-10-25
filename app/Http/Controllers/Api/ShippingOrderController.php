@@ -60,6 +60,7 @@ final class ShippingOrderController
             }
 
             $row = $this->normalizeOverdueImportedRow($row);
+            $row = $this->clampRowLengthsForValidation($row);
 
             $validator = Validator::make($row, [
                 'import_key' => ['required', 'string', 'max:190'],
@@ -891,6 +892,31 @@ final class ShippingOrderController
     private function isPlaceholderAdName(mixed $value): bool
     {
         return trim((string) $value) === 'Produto sem titulo';
+    }
+
+    /**
+     * Corta campos longos nos mesmos limites do validator para a importacao
+     * nunca rejeitar 422 por comprimento de titulo/variacao da planilha.
+     */
+    private function clampRowLengthsForValidation(array $row): array
+    {
+        $limits = [
+            'import_key' => 190,
+            'platform_order_number' => 120,
+            'ad_name' => 255,
+            'variation' => 255,
+            'recipient_name' => 190,
+            'tracking_number' => 120,
+            'source_file_name' => 190,
+        ];
+
+        foreach ($limits as $field => $limit) {
+            if (isset($row[$field]) && is_string($row[$field]) && mb_strlen($row[$field]) > $limit) {
+                $row[$field] = mb_substr($row[$field], 0, $limit);
+            }
+        }
+
+        return $row;
     }
 
     private function normalizeOverdueImportedRow(array $row): array

@@ -577,6 +577,53 @@ class ApiModulesTest extends TestCase
         $this->assertSame('2027-03-20', $orders[0]->shipping_deadline);
     }
 
+    public function test_shipping_import_truncates_oversized_row_fields_instead_of_rejecting(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/shipping/orders/import', [
+            'rows' => [[
+                'import_key' => str_repeat('k', 250),
+                'platform_order_number' => str_repeat('9', 200),
+                'ad_name' => str_repeat('A', 300),
+                'variation' => str_repeat('V', 300),
+                'image_url' => null,
+                'buyer_notes' => null,
+                'observations' => null,
+                'product_qty' => 1,
+                'recipient_name' => str_repeat('N', 250),
+                'tracking_number' => str_repeat('R', 200),
+                'source_file_name' => str_repeat('F', 250) . '.xlsx',
+                'shipping_deadline' => '2027-03-20',
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('stats.inserted', 1);
+
+        $order = DB::table('shipping_orders')->where('user_id', $user->id)->first();
+        $this->assertNotNull($order);
+        $this->assertSame(190, mb_strlen((string) $order->import_key));
+        $this->assertSame(120, mb_strlen((string) $order->platform_order_number));
+        $this->assertSame(255, mb_strlen((string) $order->ad_name));
+        $this->assertSame(255, mb_strlen((string) $order->variation));
+        $this->assertSame(190, mb_strlen((string) $order->recipient_name));
+        $this->assertSame(120, mb_strlen((string) $order->tracking_number));
+        $this->assertSame(190, mb_strlen((string) $order->source_file_name));
+    }
+
+    public function test_modelos_file_art_route_is_public_for_cors_image_loading(): void
+    {
+        // Sem autenticacao a rota nao pode dar 401: o navegador busca a arte
+        // com GET simples porque o preflight morre no nginx da VPS (405).
+        $this->getJson('/api/modelos-file/modelos/naoexiste.jpg')
+            ->assertStatus(404);
+    }
+
     public function test_admin_can_import_shopee_rows_filter_by_month_and_auto_create_unique_products(): void
     {
         $user = User::factory()->create([

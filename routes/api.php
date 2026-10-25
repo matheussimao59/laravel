@@ -104,6 +104,10 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::post('/integrations/mercado-livre/notifications', [MercadoLivreController::class, 'notifications']);
+// Arte dos modelos com CORS: nomes de arquivo aleatorios e sem dados de usuario;
+// publica para o navegador buscar a imagem SEM preflight (o preflight de .jpg
+// morre no nginx da VPS com 405).
+Route::get('/modelos-file/{path}', [ModeloController::class, 'serveArt'])->where('path', '.*');
 Route::get('/print-agent/jobs/next', [LocalPrintJobController::class, 'next']);
 Route::post('/print-agent/jobs/{job}/complete', [LocalPrintJobController::class, 'complete']);
 Route::post('/print-agent/printers', [LocalPrintJobController::class, 'syncPrinters']);
@@ -171,7 +175,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/fiscal/documents/{document}', [FiscalDocumentController::class, 'destroy']);
 
     Route::get('/modelos', [ModeloController::class, 'index']);
-    Route::get('/modelos-file/{path}', [ModeloController::class, 'serveArt'])->where('path', '.*');
     Route::post('/modelos', [ModeloController::class, 'store']);
     Route::get('/modelos/access-users', [ModeloController::class, 'accessUsers']);
     Route::post('/modelos/access-users', [ModeloController::class, 'updateBulkAccessUsers']);
