@@ -1452,9 +1452,18 @@ final class MercadoLivreService
     {
         $token = $this->accessTokenForUser($user);
         $seller = $this->sellerForUser($user, $token);
+        // Restricao deliberada aos MESMOS filtros comprovados do orders/search
+        // (usados pelo syncOrders em producao): seller, sort, limit, offset e
+        // janela de data. Filtros extras (tags.not, listas em order.status) sao
+        // rejeitados por versoes da API e abortariam a pagina inteira; a lista
+        // final ja sai filtrada pelo classificador de envio.
+        $fromDate = now()->subDays(90)->startOfDay()->toIso8601String();
         $query = http_build_query([
-            'seller' => $seller['id'], 'order.status' => 'paid,partially_refunded',
-            'tags.not' => 'delivered,shipped,not_delivered,cancelled', 'sort' => 'date_desc', 'limit' => 10, 'offset' => $offset,
+            'seller' => (string) $seller['id'],
+            'sort' => 'date_desc',
+            'limit' => '10',
+            'offset' => (string) max(0, $offset),
+            'order.date_created.from' => $fromDate,
         ]);
         $data = $this->personalizationGet('/orders/search?' . $query, $token);
         if (!is_array($data['results'] ?? null)) throw new ExternalServiceException('Lista de pedidos indisponivel.', 502);

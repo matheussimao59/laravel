@@ -107,8 +107,50 @@ final class MlPendingOrderController
 
     private function failure(\Throwable $exception): JsonResponse
     {
-        $limited = $exception instanceof ExternalServiceException && $exception->status() === 429;
+        if ($exception instanceof ConnectionException) {
+            return response()->json([
+                'message' => 'O Mercado Livre nao respondeu a tempo. Nenhuma leitura parcial foi guardada; tente novamente em alguns minutos.',
+            ], 422);
+        }
 
-        return response()->json(['message' => $limited ? 'O Mercado Livre limitou as consultas. Aguarde antes de continuar.' : 'Nao foi possivel concluir a consulta. Verifique a conta e as permissoes; dados parciais nao autorizam preenchimento automatico.'], $limited ? 429 : 422);
+        if (!$exception instanceof ExternalServiceException) {
+            report($exception);
+
+            return response()->json([
+                'message' => 'Nao foi possivel concluir a consulta. Verifique a conta e as permissoes; dados parciais nao autorizam preenchimento automatico.',
+            ], 422);
+        }
+
+        if ($exception->status() === 429) {
+            return response()->json([
+                'message' => 'O Mercado Livre limitou as consultas. Aguarde alguns segundos antes de continuar.',
+            ], 429);
+        }
+
+        // O front desloga o usuario em qualquer 401: falhas externas voltam como
+        // 422 com orientacao de refazer o vinculo da conta.
+        $metadata = json_decode($exception->getMessage(), true);
+        if (!is_array($metadata)) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $code = (int) ($metadata['status'] ?? $exception->status());
+        $details = $metadata['details'] ?? null;
+        $detail = is_array($details)
+            ? (string) ($details['message'] ?? $details['description'] ?? $details['error'] ?? '')
+            : trim((string) ($details ?? ''));
+        $detail = trim($detail);
+
+        $hint = match (true) {
+            $code === 401 => 'A conta do Mercado Livre foi desconectada ou o token expirou. Reconecte a conta no Painel Mercado Livre.',
+            $code === 403 => 'A conta nao tem permissao para este recurso. Refaca a autorizacao no Painel Mercado Livre para liberar pedidos, envios e mensagens.',
+            $code === 404 => 'Este pedido ou conversa nao esta mais disponivel no Mercado Livre.',
+            default => 'O Mercado Livre recusou a consulta.',
+        };
+
+        return response()->json([
+            'message' => $hint . ($detail !== '' ? " Resposta da API: {$detail}." : ''),
+            'reason' => ['status' => $code, 'path' => (string) ($metadata['path'] ?? '')],
+        ], 422);
     }
 }

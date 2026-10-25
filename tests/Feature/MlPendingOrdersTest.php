@@ -95,6 +95,52 @@ class MlPendingOrdersTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_search_fallback_reports_ml_rejection_with_api_detail(): void
+    {
+        $this->account();
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.mercadolibre.com/orders/search*' => Http::response([
+                'message' => 'Invalid filter (tags.not)',
+                'error' => 'bad_request',
+            ], 400),
+        ]);
+
+        $this->postJson('/api/integrations/mercado-livre/pending-orders/sync', ['offset' => 0])
+            ->assertStatus(422)
+            ->assertJson(function ($json) {
+                $json->where('message', fn ($message) => str_contains((string) $message, 'Invalid filter (tags.not)'))
+                    ->where('message', fn ($message) => str_contains((string) $message, 'recusou a consulta'))
+                    ->where('reason.status', 400)
+                    ->where('reason.path', fn ($path) => str_contains((string) $path, '/orders/search'))
+                    ->etc();
+            });
+        $this->getJson('/api/integrations/mercado-livre/pending-orders')->assertOk()->assertJsonPath('orders', []);
+    }
+
+    public function test_expired_session_directs_to_reconnect_account(): void
+    {
+        $this->account();
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.mercadolibre.com/orders/search*' => Http::response([
+                'message' => 'invalid_token',
+                'error' => 'unauthorized',
+            ], 401),
+        ]);
+
+        $this->postJson('/api/integrations/mercado-livre/pending-orders/sync', ['offset' => 0])
+            ->assertStatus(422)
+            ->assertJson(function ($json) {
+                $json->where('message', fn ($message) => str_contains((string) $message, 'Reconecte a conta'))
+                    ->where('message', fn ($message) => str_contains((string) $message, 'invalid_token'))
+                    ->where('reason.status', 401)
+                    ->etc();
+            });
+        // 401 externo nunca desloga o usuario do painel.
+        $this->getJson('/api/auth/me')->assertOk();
+    }
+
     private function account(): User
     {
         config()->set('services.mercado_livre.base_url', 'https://api.mercadolibre.com');
