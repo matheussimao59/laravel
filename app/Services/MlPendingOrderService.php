@@ -40,6 +40,7 @@ final class MlPendingOrderService
             'buyer_id' => (int) ($order['buyer']['id'] ?? 0) ?: null,
             'buyer_label' => mb_substr((string) ($order['buyer']['nickname'] ?? ('Comprador #' . ($order['buyer']['id'] ?? ''))), 0, 255),
             'ordered_at' => $date, 'order_status' => (string) ($order['status'] ?? ''),
+            'order_tags' => is_array($order['tags'] ?? null) ? array_values($order['tags']) : null,
             'shipment_id' => !empty($order['shipping']['id']) ? (string) $order['shipping']['id'] : null,
             'shipment_status' => $snapshot['shipment']['status'] ?? $order['shipping']['status'] ?? null,
             'is_pending' => MlPendingShipment::classify($order, $snapshot['shipment'] ?? null),
@@ -61,15 +62,33 @@ final class MlPendingOrderService
     {
         $token = (string) Str::uuid();
         $this->purchase($user, $row)->update(['analysis_token' => $token, 'messages_complete' => false]);
-        // Revalida o envio inclusive para pedidos que desapareceram da busca por ja terem sido enviados.
         $purchase = $this->purchase($user, $row)->get();
+        // Revalidacao leve antes de ler o chat: so o envio (os dados do pedido
+        // vieram da sincronizacao). Isso mantem a analise dentro dos limites da API.
         foreach ($purchase as $member) {
-            try { $snapshot = $this->ml->pendingOrderSnapshot($user, $member->order_id); }
-            catch (ExternalServiceException|ConnectionException $exception) { $member->update(['is_pending' => null]); throw $exception; }
-            if ((int) $snapshot['seller_id'] !== (int) $row->seller_id) throw new ExternalServiceException('Conta do pedido divergente.', 422);
-            $this->storeSnapshot($user, $snapshot);
+            try {
+                $shipment = $member->shipment_id
+                    ? $this->ml->pendingShipmentForUser($user, (string) $member->shipment_id)
+                    : null;
+            } catch (ExternalServiceException|ConnectionException $exception) {
+                $member->update(['is_pending' => null]);
+                throw $exception;
+            }
+            $member->update([
+                'shipment_status' => $shipment['status'] ?? $member->shipment_status,
+                'is_pending' => MlPendingShipment::classify(
+                    ['status' => $member->order_status, 'tags' => $member->order_tags],
+                    $shipment
+                ),
+                'synced_at' => now(),
+            ]);
+            // Tamanho do carrinho e confirmado uma unica vez, so quando o envio segue pendente.
+            if (($member->pack_id !== null) && $member->pack_size === null && $member->is_pending === true) {
+                $member->update(['pack_size' => $this->ml->pendingPackSizeForUser($user, (string) $member->pack_id, $member->order_id)]);
+            }
         }
         $row->refresh();
+        $purchase = $this->purchase($user, $row)->get();
         if ($row->is_pending !== true) return ['analyzed' => false, 'message' => 'O envio nao esta pendente ou precisa ser verificado. Nenhuma mensagem foi enviada.'];
 
         $conversation = $this->ml->personalizationConversation($user, $row->order_id, $row->pack_id, (int) $row->buyer_id);

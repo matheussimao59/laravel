@@ -1516,6 +1516,36 @@ final class MercadoLivreService
         return ['seller_id' => (int) $seller['id'], 'order' => $order, 'shipment' => $shipment, 'pack_size' => $packSize];
     }
 
+    /** Revalidacao leve usada antes da analise: so consulta o envio do pedido salvo. */
+    public function pendingShipmentForUser(User $user, string $shipmentId): ?array
+    {
+        $token = $this->accessTokenForUser($user);
+        $seller = $this->sellerForUser($user, $token);
+        $shipment = $this->personalizationGet('/shipments/' . rawurlencode($shipmentId), $token);
+        if (isset($shipment['sender_id']) && (int) $shipment['sender_id'] !== (int) $seller['id']) {
+            throw new ExternalServiceException('Nao foi possivel verificar o envio desta conta.', 422);
+        }
+
+        return $shipment;
+    }
+
+    /** Confirma o tamanho do carrinho uma unica vez; falhas deixam o tamanho em revisao. */
+    public function pendingPackSizeForUser(User $user, string $packId, string $orderId): ?int
+    {
+        $token = $this->accessTokenForUser($user);
+        $seller = $this->sellerForUser($user, $token);
+        try {
+            $pack = $this->personalizationGet('/packs/' . rawurlencode($packId), $token);
+            $ids = array_map('strval', array_column(is_array($pack['orders'] ?? null) ? $pack['orders'] : [], 'id'));
+        } catch (ExternalServiceException|ConnectionException $exception) {
+            if ($exception instanceof ExternalServiceException && $exception->status() === 429) throw $exception;
+
+            return null;
+        }
+
+        return in_array((string) $orderId, $ids, true) ? count($ids) : null;
+    }
+
     /** Le todas as paginas disponiveis; uma leitura parcial nunca autoriza preenchimento. */
     public function personalizationConversation(User $user, string $orderId, ?string $packId, int $buyerId): array
     {
@@ -1526,6 +1556,7 @@ final class MercadoLivreService
         $agents = [3037675074, 3020819166, 3037204123, 3037204279, 3037674934, 3037204685];
         for ($page = 0; $page < 20; $page++) {
             if (microtime(true) > $deadline) break;
+            if ($page > 0) usleep(400000); // evita estourar limites do chat em paginas seguidas
             $path = "/messages/packs/{$target}/sellers/{$seller['id']}?offset={$offset}&limit=50&tag=post_sale&mark_as_read=false";
             $data = $this->personalizationGet($path, $token);
             $rows = $data['messages'] ?? $data['conversation'] ?? null;
