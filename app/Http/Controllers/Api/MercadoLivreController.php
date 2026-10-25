@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\User;
 use App\Services\MercadoLivreService;
+use App\Services\MercadoLivreSaleProductService;
 use App\Support\ExternalServiceException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -105,6 +106,10 @@ final class MercadoLivreController
 
             if ($user && is_array($payload['seller'] ?? null)) {
                 $this->service->rememberSellerForUser($user, $payload['seller']);
+                $catalog = app(MercadoLivreSaleProductService::class);
+                $sellerId = (int) $payload['seller']['id'];
+                $payload['products_import'] = $catalog->importOrders($user, $sellerId, $payload['orders'] ?? []);
+                $payload['orders'] = $catalog->attachCosts($user, $sellerId, $payload['orders'] ?? []);
             }
 
             return response()->json($payload);

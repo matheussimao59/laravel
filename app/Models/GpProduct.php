@@ -90,4 +90,11 @@ class GpProduct extends Model
         }
         return round($total, 2);
     }
+
+    public function productionCost(): float
+    {
+        $materials = $this->materials->isNotEmpty() ? $this->calculated_cost_materials : (float) $this->cost_materials;
+
+        return round($materials + (float) $this->cost_labor + (float) $this->cost_fixed + (float) $this->cost_other, 2);
+    }
 }

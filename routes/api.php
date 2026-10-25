@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\LocalPrintJobController;
 use App\Http\Controllers\Api\MercadoLivreController;
 use App\Http\Controllers\Api\MercadoLivreConfigController;
 use App\Http\Controllers\Api\MercadoLivreBotController;
+use App\Http\Controllers\Api\MercadoLivreSaleProductController;
 use App\Http\Controllers\Api\ModeloController;
 use App\Http\Controllers\Api\PricingMaterialController;
 use App\Http\Controllers\Api\PricingProductController;
@@ -182,6 +183,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/modelos/{modelo}', [ModeloController::class, 'destroy']);
 
     Route::prefix('integrations/mercado-livre')->group(function () {
+        Route::get('/sale-products', [MercadoLivreSaleProductController::class, 'index']);
+        Route::post('/sale-products/sync', [MercadoLivreSaleProductController::class, 'sync']);
+        Route::post('/sale-products/{id}/refresh', [MercadoLivreSaleProductController::class, 'refresh'])->whereNumber('id');
         Route::get('/config', [MercadoLivreConfigController::class, 'show']);
         Route::put('/config', [MercadoLivreConfigController::class, 'update']);
         Route::get('/account', [MercadoLivreController::class, 'account']);

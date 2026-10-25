@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\GpProduct;
 use App\Models\GpCategory;
+use App\Models\MlSaleProduct;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class GpProductController
 {
@@ -50,7 +52,7 @@ class GpProductController
             'name' => ['required', 'string', 'max:255'],
             'sku' => ['nullable', 'string', 'max:100'],
             'category' => ['nullable', 'string', 'max:255'],
-            'category_id' => ['nullable', 'integer', 'exists:gp_categories,id'],
+            'category_id' => ['nullable', 'integer', Rule::exists('gp_categories', 'id')->where('user_id', $user->id)],
             'description' => ['nullable', 'string'],
             'sell_price' => ['required', 'numeric', 'min:0'],
             'pricing_type' => ['nullable', 'string', 'in:fixed,per_sheet'],
@@ -69,7 +71,7 @@ class GpProductController
             'art_image_url' => ['nullable', 'string'],
             'sale_channels_json' => ['nullable', 'array'],
             'materials' => ['nullable', 'array'],
-            'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
+            'materials.*.material_id' => ['required_with:materials', 'integer', Rule::exists('gp_materials', 'id')->where('user_id', $user->id)],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
             'materials.*.cost_override' => ['nullable', 'numeric', 'min:0'],
             'discount_tiers' => ['nullable', 'array'],
@@ -151,7 +153,7 @@ class GpProductController
             'name' => ['sometimes', 'string', 'max:255'],
             'sku' => ['sometimes', 'nullable', 'string', 'max:100'],
             'category' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'category_id' => ['sometimes', 'nullable', 'integer', 'exists:gp_categories,id'],
+            'category_id' => ['sometimes', 'nullable', 'integer', Rule::exists('gp_categories', 'id')->where('user_id', $user->id)],
             'description' => ['sometimes', 'nullable', 'string'],
             'sell_price' => ['sometimes', 'numeric', 'min:0'],
             'pricing_type' => ['sometimes', 'nullable', 'string', 'in:fixed,per_sheet'],
@@ -161,6 +163,7 @@ class GpProductController
             'cost_labor' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'cost_fixed' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'cost_other' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'confirm_zero_cost' => ['sometimes', 'boolean'],
             'active' => ['sometimes', 'boolean'],
             'image_url' => ['sometimes', 'nullable', 'string'],
             'cut_shape' => ['sometimes', 'nullable', 'string', 'in:round,square,rectangle'],
@@ -170,7 +173,7 @@ class GpProductController
             'art_image_url' => ['sometimes', 'nullable', 'string'],
             'sale_channels_json' => ['nullable', 'array'],
             'materials' => ['nullable', 'array'],
-            'materials.*.material_id' => ['required_with:materials', 'integer', 'exists:gp_materials,id'],
+            'materials.*.material_id' => ['required_with:materials', 'integer', Rule::exists('gp_materials', 'id')->where('user_id', $user->id)],
             'materials.*.qty_needed' => ['required_with:materials', 'numeric', 'min:0.001'],
             'materials.*.cost_override' => ['nullable', 'numeric', 'min:0'],
             'discount_tiers' => ['nullable', 'array'],
@@ -206,6 +209,13 @@ class GpProductController
 
             if ($request->has('discount_tiers')) {
                 $this->syncDiscountTiers($product, $request);
+            }
+
+            if ($request->hasAny(['materials', 'cost_materials', 'cost_labor', 'cost_fixed', 'cost_other', 'confirm_zero_cost'])) {
+                $product->load('materials');
+                $confirmed = $product->productionCost() > 0 || $request->boolean('confirm_zero_cost');
+                MlSaleProduct::where('user_id', $user->id)->where('gp_product_id', $product->id)
+                    ->update(['costs_configured_at' => $confirmed ? now() : null]);
             }
 
             DB::commit();

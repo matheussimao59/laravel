@@ -512,6 +512,25 @@ final class MercadoLivreService
         }
     }
 
+    public function saleItemDetailsForUser(User $user, string $itemId): array
+    {
+        $token = $this->accessTokenForUser($user);
+        $item = $this->request('/items/' . rawurlencode($itemId), $token);
+        if (!is_array($item)) {
+            throw new ExternalServiceException('Dados do anuncio indisponiveis.', 502);
+        }
+        try {
+            $description = $this->request('/items/' . rawurlencode($itemId) . '/description', $token);
+        } catch (ExternalServiceException $exception) {
+            $metadata = json_decode($exception->getMessage(), true);
+            if (($metadata['status'] ?? null) !== 404) throw $exception;
+            $description = [];
+        }
+        $item['description'] = (string) ($description['plain_text'] ?? $description['text'] ?? '');
+
+        return $item;
+    }
+
     public function updateSellerProductForUser(User $user, string $itemId, array $payload): array
     {
         $accessToken = $this->accessTokenForUser($user);
@@ -1550,6 +1569,8 @@ final class MercadoLivreService
         );
 
         $sellerId = (int) $payload['seller']['id'];
+
+        app(MercadoLivreSaleProductService::class)->importOrders($user, $sellerId, $payload['orders'] ?? []);
 
         // Vinculo anuncio -> grupo salvo no banco (a escolha do usuario).
         $groupIdByItem = [];
