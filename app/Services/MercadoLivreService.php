@@ -921,6 +921,70 @@ final class MercadoLivreService
             $order['shipping_date_resolved'] = $this->resolveShippingDate($order);
         }
         unset($order);
+
+        // Venda combinada (carrinho) cria varios pedidos com o MESMO envio: o frete
+        // pertence ao envio, nao a cada pedido. Sem isso, o painel multiplica o frete.
+        self::consolidateSharedShipmentCosts($orders);
+    }
+
+    /**
+     * Mantem o custo do envio apenas no pedido-ancora (maior valor, empate =
+     * menor id) e zera os irmaos, anotando a consolidacao. Pedido com envio
+     * proprio nao e tocado.
+     */
+    public static function consolidateSharedShipmentCosts(array &$orders): void
+    {
+        $members = [];
+        $count = count($orders);
+        for ($index = 0; $index < $count; $index++) {
+            $order = $orders[$index];
+            $shipmentId = trim((string) ($order['shipping_id'] ?? ($order['shipping']['id'] ?? '')));
+            unset($order);
+            if ($shipmentId === '') {
+                continue;
+            }
+            $orders[$index]['shipping_id'] = $shipmentId;
+            $members[$shipmentId][] = $index;
+        }
+
+        foreach ($members as $indexes) {
+            if (count($indexes) < 2) {
+                continue;
+            }
+
+            $anchorIndex = null;
+            $anchorAmount = 0.0;
+            $anchorOrderId = 0;
+            foreach ($indexes as $index) {
+                $order = $orders[$index];
+                $amount = (float) ($order['total_amount'] ?? 0);
+                $orderId = (int) ($order['id'] ?? 0);
+                if ($anchorIndex === null
+                    || $amount > $anchorAmount
+                    || ($amount === $anchorAmount && $orderId > 0 && $orderId < $anchorOrderId)) {
+                    $anchorAmount = $amount;
+                    $anchorOrderId = $orderId;
+                    $anchorIndex = $index;
+                }
+                unset($order);
+            }
+
+            if ($anchorIndex === null || $anchorOrderId <= 0) {
+                continue;
+            }
+
+            foreach ($indexes as $index) {
+                $isAnchor = $index === $anchorIndex;
+                $order = $orders[$index];
+                $order['shipping_shared_count'] = count($indexes);
+                if (!$isAnchor) {
+                    $order['shipping_cost_seller'] = 0;
+                }
+                $order['shipping_cost_consolidated_in'] = $anchorOrderId;
+                $orders[$index] = $order;
+                unset($order);
+            }
+        }
     }
 
     private function extractShipmentSellerCost(mixed $payload): float

@@ -1309,6 +1309,112 @@ HTML;
         ]);
     }
 
+    public function test_shared_shipment_cost_is_consolidated_once_for_cart_orders(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        DB::table('mercado_livre_accounts')->insert([
+            'user_id' => $user->id,
+            'access_token' => Crypt::encryptString('stored-access-token'),
+            'token_type' => 'bearer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // Carrinho: tres pedidos do mesmo comprador com UM envio. O frete do envio
+        // 700 foi cobrado uma vez; o painel nao pode multiplicar por pedido.
+        Http::fake([
+            'https://api.mercadolibre.com/users/me' => Http::response([
+                'id' => 456,
+                'nickname' => 'cart.seller',
+            ]),
+            'https://api.mercadolibre.com/orders/search*' => Http::response([
+                'results' => [
+                    [
+                        'id' => 100,
+                        'status' => 'paid',
+                        'total_amount' => 22.90,
+                        'date_created' => '2026-10-26T07:00:00Z',
+                        'order_items' => [],
+                        'shipping' => ['id' => 700],
+                    ],
+                    [
+                        'id' => 101,
+                        'status' => 'paid',
+                        'total_amount' => 22.90,
+                        'date_created' => '2026-10-26T07:00:05Z',
+                        'order_items' => [],
+                        'shipping' => ['id' => 700],
+                    ],
+                    [
+                        'id' => 102,
+                        'status' => 'paid',
+                        'total_amount' => 24.90,
+                        'date_created' => '2026-10-26T07:00:10Z',
+                        'order_items' => [],
+                        'shipping' => ['id' => 700],
+                    ],
+                    [
+                        'id' => 200,
+                        'status' => 'paid',
+                        'total_amount' => 45.0,
+                        'date_created' => '2026-10-26T08:00:00Z',
+                        'order_items' => [],
+                        'shipping' => ['id' => 800],
+                    ],
+                ],
+            ]),
+            'https://api.mercadolibre.com/shipments/700' => Http::response([
+                'id' => 700,
+                'status' => 'ready_to_ship',
+            ]),
+            'https://api.mercadolibre.com/shipments/700/costs' => Http::response([
+                'senders' => [
+                    ['payer_type' => 'seller', 'seller_cost' => 20.85],
+                ],
+            ]),
+            'https://api.mercadolibre.com/shipments/800' => Http::response([
+                'id' => 800,
+                'status' => 'ready_to_ship',
+            ]),
+            'https://api.mercadolibre.com/shipments/800/costs' => Http::response([
+                'senders' => [
+                    ['payer_type' => 'seller', 'seller_cost' => 6.95],
+                ],
+            ]),
+        ]);
+
+        $response = $this->postJson('/api/integrations/mercado-livre/sync', [
+            'from_date' => '2026-10-26T00:00:00Z',
+            'to_date' => '2026-10-26T23:59:59Z',
+            'include_payments_details' => false,
+            'include_shipments_details' => true,
+            'max_pages' => 1,
+        ])
+            ->assertOk();
+
+        // Ancora = pedido de maior valor (102, R$ 24,90): mantem o frete do envio uma unica vez.
+        $response->assertJsonPath('orders.0.shipping_cost_seller', 0)
+            ->assertJsonPath('orders.0.shipping_cost_consolidated_in', 102)
+            ->assertJsonPath('orders.0.shipping_shared_count', 3)
+            ->assertJsonPath('orders.1.shipping_cost_seller', 0)
+            ->assertJsonPath('orders.1.shipping_cost_consolidated_in', 102)
+            ->assertJsonPath('orders.2.shipping_cost_seller', 20.85)
+            ->assertJsonPath('orders.2.shipping_cost_consolidated_in', 102)
+            ->assertJsonPath('orders.2.shipping_shared_count', 3);
+
+        // Pedido com envio proprio nao e tocado pela consolidacao.
+        $independent = $response->json('orders.3');
+        $this->assertSame(6.95, $independent['shipping_cost_seller']);
+        $this->assertArrayNotHasKey('shipping_cost_consolidated_in', $independent);
+        $this->assertArrayNotHasKey('shipping_shared_count', $independent);
+    }
+
     public function test_mercado_livre_sync_handles_null_shipment_cost_sections(): void
     {
         $user = User::factory()->create([
