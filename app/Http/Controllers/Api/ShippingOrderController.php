@@ -165,6 +165,13 @@ final class ShippingOrderController
             $incomingShippingDeadline = $row['shipping_deadline'] ?? $this->shippingDeadlineFromRaw($incomingRaw);
             if (($lateOrder || !$existing->shipping_deadline) && $incomingShippingDeadline) {
                 $payload['shipping_deadline'] = $incomingShippingDeadline;
+
+                // Reenvio com nova data escolhida no popup do app: a data precisa valer
+                // tambem no row_raw, senao calendario e producao continuam lendo a antiga.
+                if ($lateOrder) {
+                    $mergedRaw['shipping_deadline'] = $incomingShippingDeadline;
+                    $mergedRaw['late_rescheduled_date'] = $incomingShippingDeadline;
+                }
             }
 
             if ($mergedRaw !== $currentRaw) {
@@ -924,6 +931,11 @@ final class ShippingOrderController
         $raw = is_array($row['row_raw'] ?? null) ? $row['row_raw'] : [];
         $shippingDeadline = $row['shipping_deadline'] ?? $this->shippingDeadlineFromRaw($raw);
         $today = now()->toDateString();
+
+        // Data escolhida manualmente no popup de reenvio do app: respeitar mesmo se ja passou.
+        if (!empty($raw['late_rescheduled_date'])) {
+            return $row;
+        }
 
         if (!$shippingDeadline || substr((string) $shippingDeadline, 0, 10) >= $today) {
             return $row;
